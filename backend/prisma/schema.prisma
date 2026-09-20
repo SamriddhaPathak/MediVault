@@ -1,0 +1,170 @@
+// MediVault Prisma schema
+// Dev default: SQLite (zero external services). SQLite has no native enum
+// support in Prisma, so status/category/source fields below are String
+// columns constrained by the TS union types in src/types/enums.ts and
+// validated at the API boundary with Zod (see modules/*/schemas.ts) —
+// the database just stores the string.
+//
+// For production, switch provider to "postgresql", point DATABASE_URL at
+// a Postgres instance, and you can optionally convert these String fields
+// back to real Prisma `enum` blocks (Postgres supports them) using the
+// same value sets documented in src/types/enums.ts.
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(uuid())
+  email         String   @unique
+  passwordHash  String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  healthProfile HealthProfile?
+  reports       Report[]
+  exportJobs    ExportJob[]
+  refreshTokens RefreshToken[]
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  revoked   Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model HealthProfile {
+  id                String   @id @default(uuid())
+  userId            String   @unique
+  displayName       String?
+  phone             String?
+  emergencyContact  String?
+  preferredUnits    String   @default("metric")
+  profilePhotoKey   String?
+  age               Int?
+  bloodGroup        String?
+  allergies         String?
+  knownConditions   String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Report {
+  id              String   @id @default(uuid())
+  ownerId         String
+  name            String
+  // ReportCategory: LABORATORY | PRESCRIPTION | RADIOLOGY | IMAGING | VACCINATION | OTHER
+  category        String   @default("OTHER")
+  reportDate      DateTime?
+  uploadTime      DateTime @default(now())
+  originalFileKey String
+  // SHA-256 of the uploaded file content, used only to detect the user
+  // re-uploading the exact same file (see reports.service.ts `upload`).
+  // Never exposed outside the owner's own account.
+  fileHash        String?
+  mimeType        String
+  fileSize        Int
+  // ReportStatus: UPLOADED | PROCESSING | PENDING_REVIEW | VERIFIED | OCR_FAILED | ARCHIVED
+  status          String   @default("UPLOADED")
+  ocrConfidence   Float?
+  extractedText   String?
+  failureReason   String?
+  editedByUser    Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  verifiedAt      DateTime?
+
+  owner           User             @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  extractedFields ExtractedField[]
+  testValues      TestValue[]
+  exportItems     ExportItem[]
+
+  @@index([ownerId])
+  @@index([ownerId, category])
+  @@index([ownerId, reportDate])
+  @@index([ownerId, status])
+  @@index([ownerId, fileHash])
+}
+
+model ExtractedField {
+  id              String   @id @default(uuid())
+  reportId        String
+  fieldName       String
+  value           String
+  normalizedValue String?
+  confidence      Float
+  // FieldSource: ocr | user
+  source          String   @default("ocr")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  report Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([reportId])
+}
+
+model TestValue {
+  id                 String   @id @default(uuid())
+  reportId           String
+  testName           String
+  numericValue       Float
+  unit               String?
+  recordedDate       DateTime
+  referenceRangeText String?
+  // FieldSource: ocr | user
+  source             String   @default("ocr")
+  // Per-value OCR extraction confidence (0-1). Null for user-entered values
+  // (there's nothing to be uncertain about — the user typed it directly).
+  confidence         Float?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  report Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([reportId])
+  @@index([testName])
+  @@index([recordedDate])
+}
+
+model ExportJob {
+  id               String   @id @default(uuid())
+  userId           String
+  // ExportStatus: PENDING | PROCESSING | READY | FAILED | EXPIRED
+  status           String   @default("PENDING")
+  generatedFileKey String?
+  expirationDate   DateTime?
+  failureReason    String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user  User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items ExportItem[]
+
+  @@index([userId])
+}
+
+model ExportItem {
+  id          String @id @default(uuid())
+  exportJobId String
+  reportId    String
+
+  exportJob ExportJob @relation(fields: [exportJobId], references: [id], onDelete: Cascade)
+  report    Report    @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@unique([exportJobId, reportId])
+  @@index([exportJobId])
+  @@index([reportId])
+}
