@@ -6,17 +6,17 @@ import morgan from "morgan";
 import authRoutes from "./modules/auth/auth.routes";
 import profileRoutes from "./modules/users/profile.routes";
 import reportsRoutes from "./modules/reports/reports.routes";
-import analyticsRoutes from "./modules/analytics/analytics.routes";
 import exportsRoutes from "./modules/exports/exports.routes";
+import filesRoutes from "./modules/files/files.routes";
 import { registerJobs } from "./jobs";
 
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
 
 // Custom morgan token that strips query strings before logging. Several
 // endpoints carry potentially sensitive content in query params (report
-// search terms, test names in analytics routes) — logging the full URL
-// would put medical search terms in application logs, which the product's
-// privacy requirements explicitly rule out.
+// search terms in particular) — logging the full URL would put medical
+// search terms in application logs, which the product's privacy
+// requirements explicitly rule out.
 morgan.token("safe-url", (req) => {
   const url = (req as any).originalUrl ?? (req as any).url ?? "";
   const [path] = url.split("?");
@@ -43,8 +43,8 @@ export function createApp() {
   app.use("/api/auth", authRoutes);
   app.use("/api/profile", profileRoutes);
   app.use("/api/reports", reportsRoutes);
-  app.use("/api/analytics", analyticsRoutes);
   app.use("/api/exports", exportsRoutes);
+  app.use("/api/files", filesRoutes);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

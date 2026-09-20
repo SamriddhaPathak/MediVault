@@ -11,7 +11,6 @@ import Upload from "./pages/Upload";
 import Review from "./pages/Review";
 import Records from "./pages/Records";
 import RecordDetail from "./pages/RecordDetail";
-import Trends from "./pages/Trends";
 import Exports from "./pages/Exports";
 import Profile from "./pages/Profile";
 import ImageVault from "./pages/ImageVault";
@@ -31,7 +30,6 @@ export default function App() {
             <Route path="/images" element={<ImageVault />} />
             <Route path="/records/:id" element={<RecordDetail />} />
             <Route path="/records/:id/review" element={<Review />} />
-            <Route path="/trends" element={<Trends />} />
             <Route path="/exports" element={<Exports />} />
             <Route path="/profile" element={<Profile />} />
           </Route>

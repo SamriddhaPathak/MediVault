@@ -14,8 +14,52 @@ export interface ExportJobPayload {
 const exportDir = path.resolve(env.export.localDir);
 fs.mkdirSync(exportDir, { recursive: true });
 
+// Explicit shapes for the query below, mirroring prisma/schema.prisma.
+// Deep nested `include` payloads are not always inferred reliably across
+// every TS/Prisma toolchain combination (and Prisma's own generated
+// `Prisma.XGetPayload` helpers require a fully generated client, which a
+// restricted/offline environment may not have) — spelling these out keeps
+// `item`/`f`/`t` below fully typed (never `any`) either way.
+interface ExportedField {
+  fieldName: string;
+  value: string;
+  source: string;
+  confidence: number;
+}
+interface ExportedTestValue {
+  testName: string;
+  numericValue: number;
+  unit: string | null;
+  recordedDate: Date;
+  referenceRangeText: string | null;
+  confidence: number | null;
+}
+interface ExportReportItem {
+  report: {
+    name: string;
+    category: string;
+    status: string;
+    reportDate: Date | null;
+    uploadTime: Date;
+    extractedFields: ExportedField[];
+    testValues: ExportedTestValue[];
+  };
+}
+interface ExportJobWithItems {
+  items: ExportReportItem[];
+  user: {
+    email: string;
+    healthProfile: {
+      age: number | null;
+      bloodGroup: string | null;
+      allergies: string | null;
+      knownConditions: string | null;
+    } | null;
+  };
+}
+
 export async function processExportJob({ exportJobId }: ExportJobPayload): Promise<void> {
-  const job = await prisma.exportJob.findUnique({
+  const job: ExportJobWithItems | null = await prisma.exportJob.findUnique({
     where: { id: exportJobId },
     include: { items: { include: { report: { include: { extractedFields: true, testValues: true } } } }, user: { include: { healthProfile: true } } },
   });
@@ -26,14 +70,14 @@ export async function processExportJob({ exportJobId }: ExportJobPayload): Promi
   try {
     // Ownership is guaranteed here because items were only ever attached
     // to this job for reports the requesting user owns (see exports.service).
-    const reports = job.items.map((item) => ({
+    const reports = job.items.map((item: ExportReportItem) => ({
       name: item.report.name,
       category: item.report.category,
       status: item.report.status,
       reportDate: item.report.reportDate,
       uploadTime: item.report.uploadTime,
-      fields: item.report.extractedFields.map((f) => ({ fieldName: f.fieldName, value: f.value, source: f.source, confidence: f.confidence })),
-      testValues: item.report.testValues.map((t) => ({
+      fields: item.report.extractedFields.map((f: ExportedField) => ({ fieldName: f.fieldName, value: f.value, source: f.source, confidence: f.confidence })),
+      testValues: item.report.testValues.map((t: ExportedTestValue) => ({
         testName: t.testName,
         numericValue: t.numericValue,
         unit: t.unit,

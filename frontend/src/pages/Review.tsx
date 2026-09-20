@@ -5,6 +5,7 @@ import { ExtractedField, Report, TestValue } from "../types";
 import SourceTag from "../components/SourceTag";
 import ConfidenceBadge from "../components/ConfidenceBadge";
 import PageHeader from "../components/PageHeader";
+import DocumentPreview from "../components/DocumentPreview";
 import ErrorState from "../components/ErrorState";
 import { SkeletonBlock } from "../components/Skeleton";
 import { useToast } from "../components/ToastProvider";
@@ -15,6 +16,16 @@ const CATEGORIES = ["LABORATORY", "PRESCRIPTION", "RADIOLOGY", "IMAGING", "VACCI
 // dedicated controls above) — everything else extracted (patient name,
 // doctor, hospital, or any test:* field) is shown in the general editor.
 const MANAGED_FIELD_NAMES = new Set(["category", "reportDate"]);
+
+// Temporary client-side ids for rows that have not been saved yet.
+// A `Date.now()`-based id collides when two rows are added inside the same
+// millisecond (easy with a keyboard shortcut or a fast double-click), which
+// produces duplicate React keys and makes "Remove" delete the wrong row.
+let tempIdCounter = 0;
+function nextTempId() {
+  tempIdCounter += 1;
+  return `new-${tempIdCounter}-${Date.now()}`;
+}
 
 export default function Review() {
   const { id } = useParams<{ id: string }>();
@@ -72,7 +83,7 @@ export default function Review() {
     setTestValues((prev) => [
       ...prev,
       {
-        id: `new-${Date.now()}`,
+        id: nextTempId(),
         reportId: id!,
         testName: "",
         numericValue: 0,
@@ -86,8 +97,16 @@ export default function Review() {
   }
 
   async function removeTestValue(tv: TestValue) {
+    // A rejected delete used to surface as an unhandled promise rejection,
+    // and the row stayed on screen with no explanation. Remove it locally
+    // only once the server has confirmed, and say so when it hasn't.
     if (!tv.id.startsWith("new-")) {
-      await api.delete(`/reports/${id}/test-values/${tv.id}`);
+      try {
+        await api.delete(`/reports/${id}/test-values/${tv.id}`);
+      } catch (err: any) {
+        showToast(err?.response?.data?.error ?? "We couldn't remove that test value. Please try again.", "error");
+        return;
+      }
     }
     setTestValues((prev) => prev.filter((t) => t.id !== tv.id));
   }
@@ -104,7 +123,12 @@ export default function Review() {
 
   async function removeOtherField(fieldId: string) {
     if (!fieldId.startsWith("new-")) {
-      await api.delete(`/reports/${id}/fields/${fieldId}`);
+      try {
+        await api.delete(`/reports/${id}/fields/${fieldId}`);
+      } catch (err: any) {
+        showToast(err?.response?.data?.error ?? "We couldn't remove that field. Please try again.", "error");
+        return;
+      }
     }
     setFields((prev) => prev.filter((f) => f.id !== fieldId));
   }
@@ -113,7 +137,7 @@ export default function Review() {
     setFields((prev) => [
       ...prev,
       {
-        id: `new-${Date.now()}`,
+        id: nextTempId(),
         reportId: id!,
         fieldName: "",
         value: "",
@@ -125,10 +149,30 @@ export default function Review() {
   }
 
   async function saveChanges(): Promise<boolean> {
+    const invalidTestValue = testValues.find((tv) => tv.testName.trim() && !Number.isFinite(tv.numericValue));
+    if (invalidTestValue) {
+      setSaveError(`Enter a valid number for "${invalidTestValue.testName}" before saving.`);
+      return false;
+    }
+
+    // Rows missing their name are filtered out of the request below. Saying
+    // so is important: silently discarding a row the user just typed into
+    // looks exactly like the save failing, or worse, like it succeeded.
+    if (testValues.some((tv) => !tv.testName.trim() && Number.isFinite(tv.numericValue) && tv.numericValue !== 0)) {
+      setSaveError("Give every test value a name, or remove the empty row, before saving.");
+      return false;
+    }
+    if (otherFields.some((f) => !f.fieldName.trim() && f.value.trim())) {
+      setSaveError("Give every field a name, or remove the empty row, before saving.");
+      return false;
+    }
+
     setSaving(true);
     setSaveError(null);
     try {
-      await api.patch(`/reports/${id}`, { category, reportDate: reportDate || undefined });
+      // null (not undefined) so an emptied date field actually clears the
+      // stored report date instead of leaving the old value in place.
+      await api.patch(`/reports/${id}`, { category, reportDate: reportDate || null });
 
       await api.patch(`/reports/${id}/fields`, {
         fields: otherFields
@@ -144,9 +188,13 @@ export default function Review() {
             id: tv.id.startsWith("new-") ? undefined : tv.id,
             testName: tv.testName,
             numericValue: tv.numericValue,
-            unit: tv.unit || undefined,
+            // null, not undefined: an emptied input means "clear this".
+            // Sending undefined dropped the key entirely, and Prisma reads a
+            // missing key as "leave unchanged" — so a wrong unit that OCR
+            // guessed could never be erased, only overwritten.
+            unit: tv.unit?.trim() ? tv.unit.trim() : null,
             recordedDate: tv.recordedDate,
-            referenceRangeText: tv.referenceRangeText || undefined,
+            referenceRangeText: tv.referenceRangeText?.trim() ? tv.referenceRangeText.trim() : null,
           })),
       });
       await load();
@@ -206,13 +254,7 @@ export default function Review() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <div>
           {fileUrl && (
-            <div className="surface overflow-hidden">
-              {report.name.toLowerCase().endsWith(".pdf") ? (
-                <iframe src={fileUrl} title="Original document" className="h-96 w-full" />
-              ) : (
-                <img src={fileUrl} alt="Original report" className="max-h-96 w-full object-contain" />
-              )}
-            </div>
+            <DocumentPreview report={report} fileUrl={fileUrl} />
           )}
         </div>
 
@@ -220,6 +262,12 @@ export default function Review() {
           {saveError && (
             <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
               {saveError}
+            </p>
+          )}
+
+          {report.processingNotice && (
+            <p role="status" className="rounded-lg border border-[#cbdedb] bg-[#f3f9f7] px-3 py-2 text-sm text-[#365861]">
+              {report.processingNotice}
             </p>
           )}
 
@@ -306,8 +354,11 @@ export default function Review() {
                       <input
                         type="number"
                         step="any"
-                        value={tv.numericValue}
-                        onChange={(e) => updateTestValue(idx, { numericValue: parseFloat(e.target.value) })}
+                        value={Number.isFinite(tv.numericValue) ? tv.numericValue : ""}
+                        onChange={(e) => {
+                          const parsed = parseFloat(e.target.value);
+                          updateTestValue(idx, { numericValue: Number.isFinite(parsed) ? parsed : NaN });
+                        }}
                         className="mt-0.5 w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-900"
                       />
                     </label>

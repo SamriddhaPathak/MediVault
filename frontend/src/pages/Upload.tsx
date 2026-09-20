@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { api } from "../services/api";
 import { Report } from "../types";
 import { useToast } from "../components/ToastProvider";
@@ -25,6 +25,7 @@ export default function Upload() {
   // without this, navigating away mid-upload left a setInterval running
   // forever in the background, hitting the API every 1.5s and leaking.
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [pollError, setPollError] = useState<string | null>(null);
 
   useEffect(() => {
     return () => {
@@ -86,22 +87,69 @@ export default function Upload() {
 
   function pollStatus(reportId: string) {
     if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+    setPollError(null);
+    // A single dropped request (a brief network blip, a proxy timeout) must
+    // not silently strand the user on "Processing..." forever — that was
+    // the previous behavior: the first failed poll cleared the interval
+    // with no feedback and no way to recover short of reloading. Instead,
+    // tolerate a few consecutive failures before giving up, and when we do
+    // give up, tell the user plainly and point them somewhere useful.
+    let consecutiveFailures = 0;
+    const MAX_CONSECUTIVE_FAILURES = 5;
+    const started = Date.now();
+    const STUCK_THRESHOLD_MS = 2 * 60_000; // most reports finish in seconds; a multi-page PDF can take longer
+    let stuckNoticeShown = false;
+
     pollIntervalRef.current = setInterval(async () => {
       try {
         const res = await api.get(`/reports/${reportId}`);
+        consecutiveFailures = 0;
         const r: Report = res.data.report;
         setReport(r);
         if (r.status === "PENDING_REVIEW" || r.status === "OCR_FAILED") {
           if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+          return;
+        }
+        if (!stuckNoticeShown && Date.now() - started > STUCK_THRESHOLD_MS) {
+          stuckNoticeShown = true;
+          setPollError(
+            "This is taking longer than usual. We'll keep trying — you can also check back later from Records."
+          );
         }
       } catch {
-        if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+        consecutiveFailures += 1;
+        if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+          if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+          setPollError(
+            "We're having trouble checking your report's status. It's still processing — you can find it in Records shortly."
+          );
+        }
       }
     }, 1500);
   }
 
+  async function retryProcessing() {
+    if (!report) return;
+    setPollError(null);
+    try {
+      const res = await api.post(`/reports/${report.id}/reprocess`);
+      setReport(res.data.report);
+      pollStatus(report.id);
+      showToast("Processing this document again.");
+    } catch (err: any) {
+      showToast(err?.response?.data?.error ?? "We couldn't start processing again. Please try once more.", "error");
+    }
+  }
+
   if (stage === "processing" && report) {
-    return <ProcessingView report={report} onReview={() => navigate(`/records/${report.id}/review`)} />;
+    return (
+      <ProcessingView
+        report={report}
+        pollError={pollError}
+        onRetry={retryProcessing}
+        onReview={() => navigate(`/records/${report.id}/review`)}
+      />
+    );
   }
 
   return (
@@ -211,7 +259,17 @@ export default function Upload() {
   );
 }
 
-function ProcessingView({ report, onReview }: { report: Report; onReview: () => void }) {
+function ProcessingView({
+  report,
+  pollError,
+  onRetry,
+  onReview,
+}: {
+  report: Report;
+  pollError: string | null;
+  onRetry: () => void;
+  onReview: () => void;
+}) {
   const steps = [
     { key: "uploaded", label: "File uploaded", done: true },
     { key: "processing", label: "OCR processing", done: report.status !== "UPLOADED" },
@@ -232,9 +290,20 @@ function ProcessingView({ report, onReview }: { report: Report; onReview: () => 
           {report.failureReason ?? "You can review the original document and enter the information manually."}
         </p>
         <div className="flex flex-col gap-2 pt-2">
+          {/* OCR can fail for reasons that have nothing to do with the
+              document — a timeout under load, a restart mid-job, the
+              language model still warming up. Without this button the only
+              remedy was deleting the report and uploading the same file
+              again. */}
+          <button
+            onClick={onRetry}
+            className="rounded-lg bg-brand-600 py-2.5 text-sm font-medium text-white hover:bg-brand-700"
+          >
+            Try Processing Again
+          </button>
           <button
             onClick={onReview}
-            className="rounded-lg bg-brand-600 py-2.5 text-sm font-medium text-white hover:bg-brand-700"
+            className="rounded-lg border border-[#cbdedb] bg-white py-2.5 text-sm font-medium text-[#365861] hover:bg-[#f3f9f7]"
           >
             Enter Information Manually
           </button>
@@ -249,6 +318,14 @@ function ProcessingView({ report, onReview }: { report: Report; onReview: () => 
         <p className="text-lg font-semibold text-gray-900">Upload successful</p>
         <p className="text-sm text-gray-500">Processing your report...</p>
       </div>
+      {pollError && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-center text-sm text-amber-900" role="status">
+          <p>{pollError}</p>
+          <Link to="/records" className="mt-2 inline-block font-semibold text-amber-900 underline">
+            Go to Records
+          </Link>
+        </div>
+      )}
       {/* aria-live: screen-reader users hear each step complete instead of
           only seeing the final state once processing finishes. */}
       <ul className="space-y-3" aria-live="polite" aria-atomic="false">
@@ -272,6 +349,11 @@ function ProcessingView({ report, onReview }: { report: Report; onReview: () => 
       {report.status === "PENDING_REVIEW" && (
         <div className="text-center">
           <p className="mb-3 text-sm font-medium text-gray-900">Your report is ready to review.</p>
+          {report.processingNotice && (
+            <div className="mb-4 rounded-xl border border-[#cbdedb] bg-[#f3f9f7] p-3 text-left text-sm text-[#365861]" role="status">
+              {report.processingNotice}
+            </div>
+          )}
           {report.ocrConfidence != null && report.ocrConfidence < 0.8 && (
             <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-left text-sm text-amber-900">
               <div className="flex items-center gap-2"><ConfidenceBadge confidence={report.ocrConfidence} /><span className="font-semibold">Some extracted information may be inaccurate.</span></div>

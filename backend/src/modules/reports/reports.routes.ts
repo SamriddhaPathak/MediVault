@@ -9,11 +9,9 @@ import { ValidationError } from "../../utils/errors";
 const router = Router();
 const uploadLimiter = rateLimit({ windowMs: 60_000, max: 30, keyPrefix: "upload" });
 
-// Signed-URL file access does not require the Authorization header (the
-// token itself carries the authorization), so this is registered before
-// requireAuth applies to the rest of the router.
-router.get("/file/:token", asyncHandler(reportsController.getFileByToken));
-
+// Signed-URL file access lives in its own router (src/modules/files) because
+// profile photos are served through the same signed tokens and do not belong
+// under /api/reports. Everything below requires an Authorization header.
 router.use(requireAuth);
 
 function handleUpload(req: Request, res: Response, next: NextFunction) {
@@ -43,6 +41,7 @@ router.get("/:id", asyncHandler(reportsController.getOne));
 router.patch("/:id", asyncHandler(reportsController.update));
 router.delete("/:id", asyncHandler(reportsController.remove));
 router.post("/:id/verify", asyncHandler(reportsController.verify));
+router.post("/:id/reprocess", uploadLimiter, asyncHandler(reportsController.reprocess));
 router.post("/:id/archive", asyncHandler(reportsController.archive));
 router.get("/:id/file", asyncHandler(reportsController.getFile));
 router.get("/:id/file-url", asyncHandler(reportsController.getFileUrl));

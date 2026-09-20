@@ -94,8 +94,8 @@ export default function Dashboard() {
         <Link to="/records" className="rounded-xl border border-gray-200 bg-white px-4 py-4 text-center text-sm font-medium text-gray-700 hover:bg-gray-50">
           View Records
         </Link>
-        <Link to="/trends" className="rounded-xl border border-gray-200 bg-white px-4 py-4 text-center text-sm font-medium text-gray-700 hover:bg-gray-50">
-          View Trends
+        <Link to="/images" className="rounded-xl border border-gray-200 bg-white px-4 py-4 text-center text-sm font-medium text-gray-700 hover:bg-gray-50">
+          Image Vault
         </Link>
         <Link to="/exports" className="rounded-xl border border-gray-200 bg-white px-4 py-4 text-center text-sm font-medium text-gray-700 hover:bg-gray-50">
           Export Records

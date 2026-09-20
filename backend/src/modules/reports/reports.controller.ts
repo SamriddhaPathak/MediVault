@@ -4,8 +4,6 @@ import { reportsService } from "./reports.service";
 import { fieldsService } from "./fields.service";
 import { ValidationError } from "../../utils/errors";
 import { prisma } from "../../config/prisma";
-import { storageService, verifySignedFileToken } from "../../services/storage.service";
-import { NotFoundError } from "../../utils/errors";
 
 const listQuerySchema = z.object({
   search: z.string().optional(),
@@ -17,13 +15,20 @@ const listQuerySchema = z.object({
   dateTo: z.string().optional(),
   sort: z.enum(["newest", "oldest"]).optional(),
   page: z.coerce.number().int().min(1).default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+  // Exports and the Image Vault are deliberately non-paginated browsable
+  // views: they fetch one large page (frontend FETCH_PAGE_SIZE = 500) rather
+  // than paging through the picker/grid. The cap here must be at least that
+  // large, or every request from those two pages fails validation outright
+  // — which is exactly what was happening at 100.
+  pageSize: z.coerce.number().int().min(1).max(500).default(20),
 });
 
 const updateSchema = z.object({
   name: z.string().min(1).optional(),
   category: z.enum(["LABORATORY", "PRESCRIPTION", "RADIOLOGY", "IMAGING", "VACCINATION", "OTHER"]).optional(),
-  reportDate: z.string().optional(),
+  // Nullable so a wrongly-extracted report date can be cleared, not just
+  // overwritten.
+  reportDate: z.string().nullable().optional(),
   status: z.enum(["UPLOADED", "PROCESSING", "PENDING_REVIEW", "VERIFIED", "OCR_FAILED", "ARCHIVED"]).optional(),
 });
 
@@ -32,9 +37,11 @@ const fieldEditsSchema = z.object({
     .array(
       z.object({
         id: z.string().optional(),
-        fieldName: z.string(),
-        value: z.string(),
-        normalizedValue: z.string().optional(),
+        fieldName: z.string().min(1).max(120),
+        value: z.string().max(2000),
+        // Nullable, not just optional: `null` is how the review screen says
+        // "clear this", which Prisma cannot express with `undefined`.
+        normalizedValue: z.string().max(2000).nullable().optional(),
       })
     )
     .optional(),
@@ -42,11 +49,11 @@ const fieldEditsSchema = z.object({
     .array(
       z.object({
         id: z.string().optional(),
-        testName: z.string(),
-        numericValue: z.number(),
-        unit: z.string().optional(),
+        testName: z.string().min(1).max(120),
+        numericValue: z.number().finite(),
+        unit: z.string().max(30).nullable().optional(),
         recordedDate: z.string(),
-        referenceRangeText: z.string().optional(),
+        referenceRangeText: z.string().max(120).nullable().optional(),
       })
     )
     .optional(),
@@ -99,6 +106,11 @@ export const reportsController = {
     res.json({ report });
   },
 
+  async reprocess(req: Request, res: Response) {
+    const report = await reportsService.reprocess(req.params.id, req.user!.sub);
+    res.json({ report });
+  },
+
   async archive(req: Request, res: Response) {
     const report = await reportsService.archive(req.params.id, req.user!.sub);
     res.json({ report });
@@ -114,16 +126,6 @@ export const reportsController = {
   async getFileUrl(req: Request, res: Response) {
     const url = await reportsService.getSignedFileUrl(req.params.id, req.user!.sub);
     res.json({ url });
-  },
-
-  // Public path (no auth header) but the token itself is HMAC-signed and
-  // time-limited, and encodes the exact fileKey it grants access to — so
-  // it can never be used to browse or guess another patient's files.
-  async getFileByToken(req: Request, res: Response) {
-    const verified = verifySignedFileToken(req.params.token);
-    if (!verified) throw new NotFoundError("This link has expired or is invalid.");
-    const buffer = await storageService.read(verified.fileKey);
-    res.send(buffer);
   },
 
   async listFields(req: Request, res: Response) {

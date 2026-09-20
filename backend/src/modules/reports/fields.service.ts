@@ -1,21 +1,43 @@
 import { prisma } from "../../config/prisma";
 import { reportsService } from "./reports.service";
-import { NotFoundError } from "../../utils/errors";
+import { NotFoundError, ValidationError } from "../../utils/errors";
 
 export interface FieldEdit {
   id?: string; // present = update existing, absent = create new
   fieldName: string;
   value: string;
-  normalizedValue?: string;
+  // `null` means "clear this". Optional fields are sent as null rather than
+  // omitted by the review screen, because Prisma treats `undefined` as
+  // "leave unchanged" — which previously made it impossible to erase a unit
+  // or a reference range once OCR had guessed one.
+  normalizedValue?: string | null;
 }
 
 export interface TestValueEdit {
   id?: string;
   testName: string;
   numericValue: number;
-  unit?: string;
+  unit?: string | null;
   recordedDate: string;
-  referenceRangeText?: string;
+  referenceRangeText?: string | null;
+}
+
+// Normalizes an optional text field to `null` (clear) instead of `undefined`
+// (no-op), so an emptied input actually clears the stored value.
+function clearable(value: string | null | undefined): string | null {
+  if (value === undefined || value === null) return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+// Manual entry on a report whose OCR failed is a supported path: once the
+// user supplies any detail, the report is no longer "unreadable", it is
+// awaiting their review — and it must leave OCR_FAILED so it can be verified.
+async function promoteFromOcrFailed(reportId: string) {
+  await prisma.report.updateMany({
+    where: { id: reportId, status: "OCR_FAILED" },
+    data: { status: "PENDING_REVIEW", failureReason: null },
+  });
 }
 
 export const fieldsService = {
@@ -39,14 +61,15 @@ export const fieldsService = {
         const existing = await prisma.extractedField.findFirst({ where: { id: edit.id, reportId } });
         if (!existing) throw new NotFoundError("Field not found.");
 
+        const nextNormalized = clearable(edit.normalizedValue);
         const changed =
-          existing.value !== edit.value || (edit.normalizedValue ?? null) !== (existing.normalizedValue ?? null);
+          existing.value !== edit.value || nextNormalized !== (existing.normalizedValue ?? null);
 
         results.push(
           await prisma.extractedField.update({
             where: { id: edit.id },
             data: changed
-              ? { value: edit.value, normalizedValue: edit.normalizedValue, source: "user", confidence: 1 }
+              ? { value: edit.value, normalizedValue: nextNormalized, source: "user", confidence: 1 }
               : {},
           })
         );
@@ -57,7 +80,7 @@ export const fieldsService = {
               reportId,
               fieldName: edit.fieldName,
               value: edit.value,
-              normalizedValue: edit.normalizedValue,
+              normalizedValue: clearable(edit.normalizedValue),
               confidence: 1,
               source: "user",
             },
@@ -65,7 +88,10 @@ export const fieldsService = {
         );
       }
     }
-    if (edits.length > 0) await prisma.report.update({ where: { id: reportId }, data: { editedByUser: true } });
+    if (edits.length > 0) {
+      await prisma.report.update({ where: { id: reportId }, data: { editedByUser: true } });
+      await promoteFromOcrFailed(reportId);
+    }
     return results;
   },
 
@@ -84,6 +110,14 @@ export const fieldsService = {
 
     for (const edit of edits) {
       const recordedDate = new Date(edit.recordedDate);
+      // An unparseable date would otherwise reach Prisma as `Invalid Date`
+      // and fail deep in the driver with an opaque error.
+      if (Number.isNaN(recordedDate.getTime())) {
+        throw new ValidationError(`Enter a valid date for "${edit.testName}".`);
+      }
+
+      const nextUnit = clearable(edit.unit);
+      const nextReferenceRange = clearable(edit.referenceRangeText);
 
       if (edit.id) {
         const existing = await prisma.testValue.findFirst({ where: { id: edit.id, reportId } });
@@ -92,9 +126,9 @@ export const fieldsService = {
         const changed =
           existing.testName !== edit.testName ||
           existing.numericValue !== edit.numericValue ||
-          (existing.unit ?? null) !== (edit.unit ?? null) ||
+          (existing.unit ?? null) !== nextUnit ||
           existing.recordedDate.getTime() !== recordedDate.getTime() ||
-          (existing.referenceRangeText ?? null) !== (edit.referenceRangeText ?? null);
+          (existing.referenceRangeText ?? null) !== nextReferenceRange;
 
         if (!changed) {
           results.push(existing);
@@ -108,9 +142,9 @@ export const fieldsService = {
             data: {
               testName: edit.testName,
               numericValue: edit.numericValue,
-              unit: edit.unit,
+              unit: nextUnit,
               recordedDate,
-              referenceRangeText: edit.referenceRangeText,
+              referenceRangeText: nextReferenceRange,
               source: "user",
               confidence: null, // a value the user typed carries no OCR uncertainty
             },
@@ -124,9 +158,9 @@ export const fieldsService = {
               reportId,
               testName: edit.testName,
               numericValue: edit.numericValue,
-              unit: edit.unit,
+              unit: nextUnit,
               recordedDate,
-              referenceRangeText: edit.referenceRangeText,
+              referenceRangeText: nextReferenceRange,
               source: "user",
               confidence: null,
             },
@@ -134,7 +168,10 @@ export const fieldsService = {
         );
       }
     }
-    if (anyChanged) await prisma.report.update({ where: { id: reportId }, data: { editedByUser: true } });
+    if (anyChanged) {
+      await prisma.report.update({ where: { id: reportId }, data: { editedByUser: true } });
+      await promoteFromOcrFailed(reportId);
+    }
     return results;
   },
 

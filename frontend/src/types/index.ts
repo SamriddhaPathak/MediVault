@@ -24,6 +24,10 @@ export interface Report {
   uploadTime: string;
   ocrConfidence: number | null;
   failureReason: string | null;
+  // Non-fatal notices from a successful extraction (page limit reached,
+  // extracted-value cap hit). Shown alongside the results, unlike
+  // failureReason which only appears for a failed report.
+  processingNotice?: string | null;
   editedByUser: boolean;
   verifiedAt: string | null;
 }

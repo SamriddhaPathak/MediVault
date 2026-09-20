@@ -28,30 +28,115 @@ export interface ParsedMedicalField {
   confidence: number; // 0-1
 }
 
-const CATEGORY_KEYWORDS: Record<ReportCategory, string[]> = {
-  LABORATORY: ["laboratory", "lab report", "pathology", "blood test", "cbc", "hemoglobin", "glucose"],
-  PRESCRIPTION: ["prescription", "rx", "dosage", "tablet", "capsule", "sig:", "refill"],
-  RADIOLOGY: ["radiology", "x-ray", "xray", "ct scan", "mri", "ultrasound", "sonography"],
-  IMAGING: ["imaging", "scan report", "impression:", "findings:"],
-  VACCINATION: ["vaccination", "vaccine", "immunization", "dose 1", "dose 2", "booster"],
+// Each keyword carries a weight: highly specific, single-meaning terms
+// (a named modality like "mri", a named test like "hemoglobin") outweigh
+// generic terms that multiple categories could plausibly share
+// ("findings:", "report") so a document that mixes vocabulary still lands
+// on the more specific category instead of whichever list is longest.
+const CATEGORY_KEYWORDS: Record<ReportCategory, Array<{ term: string; weight: number }>> = {
+  LABORATORY: [
+    { term: "laboratory", weight: 2 },
+    { term: "lab report", weight: 2 },
+    { term: "pathology", weight: 2 },
+    { term: "blood test", weight: 2 },
+    { term: "cbc", weight: 2 },
+    { term: "complete blood count", weight: 2 },
+    { term: "hemoglobin", weight: 1.5 },
+    { term: "hematology", weight: 1.5 },
+    { term: "biochemistry", weight: 1.5 },
+    { term: "glucose", weight: 1 },
+    { term: "specimen", weight: 1 },
+    { term: "reference range", weight: 1 },
+    { term: "serology", weight: 1.5 },
+    { term: "urinalysis", weight: 1.5 },
+    { term: "lipid profile", weight: 1.5 },
+    { term: "liver function", weight: 1.5 },
+    { term: "kidney function", weight: 1.5 },
+    { term: "thyroid panel", weight: 1.5 },
+  ],
+  PRESCRIPTION: [
+    { term: "prescription", weight: 2 },
+    { term: "rx", weight: 1 },
+    { term: "dosage", weight: 1 },
+    { term: "tablet", weight: 1 },
+    { term: "capsule", weight: 1 },
+    { term: "sig:", weight: 1.5 },
+    { term: "refill", weight: 1.5 },
+    { term: "pharmacy", weight: 1.5 },
+    { term: "take as directed", weight: 1.5 },
+    { term: "twice daily", weight: 1 },
+    { term: "once daily", weight: 1 },
+    { term: "dispense", weight: 1.5 },
+  ],
+  RADIOLOGY: [
+    { term: "radiology", weight: 2 },
+    { term: "radiologist", weight: 2 },
+    { term: "x-ray", weight: 2 },
+    { term: "xray", weight: 2 },
+    { term: "ct scan", weight: 2 },
+    { term: "computed tomography", weight: 2 },
+    { term: "mri", weight: 2 },
+    { term: "magnetic resonance", weight: 2 },
+    { term: "ultrasound", weight: 2 },
+    { term: "sonography", weight: 2 },
+    { term: "doppler", weight: 1.5 },
+    { term: "contrast", weight: 1 },
+    { term: "pet scan", weight: 2 },
+    { term: "mammogram", weight: 2 },
+  ],
+  IMAGING: [
+    { term: "imaging", weight: 1.5 },
+    { term: "scan report", weight: 1.5 },
+    { term: "impression:", weight: 1 },
+    { term: "findings:", weight: 1 },
+    { term: "radiograph", weight: 1.5 },
+  ],
+  VACCINATION: [
+    { term: "vaccination", weight: 2 },
+    { term: "vaccine", weight: 2 },
+    { term: "immunization", weight: 2 },
+    { term: "dose 1", weight: 1.5 },
+    { term: "dose 2", weight: 1.5 },
+    { term: "booster", weight: 1.5 },
+    { term: "batch no", weight: 1 },
+    { term: "lot no", weight: 1 },
+    { term: "vaccine card", weight: 2 },
+    { term: "immunization record", weight: 2 },
+  ],
   OTHER: [],
 };
 
+// A document's title/header area is by far the strongest signal for what
+// kind of document it is (e.g. "LABORATORY REPORT" printed at the top), so
+// keyword hits there count extra. Keeps the effect local and cheap — no
+// need for real layout analysis, just the first few lines of OCR text.
+const TITLE_WINDOW_CHARS = 200;
+const TITLE_BOOST_MULTIPLIER = 1.5;
+
 export function categorize(text: string): { category: ReportCategory; confidence: number } {
   const lower = text.toLowerCase();
+  const titleArea = lower.slice(0, TITLE_WINDOW_CHARS);
   let best: ReportCategory = "OTHER";
-  let bestHits = 0;
+  let bestScore = 0;
+  let bestHitCount = 0;
 
   (Object.keys(CATEGORY_KEYWORDS) as ReportCategory[]).forEach((cat) => {
     if (cat === "OTHER") return;
-    const hits = CATEGORY_KEYWORDS[cat].filter((kw) => lower.includes(kw)).length;
-    if (hits > bestHits) {
-      bestHits = hits;
+    let score = 0;
+    let hitCount = 0;
+    for (const { term, weight } of CATEGORY_KEYWORDS[cat]) {
+      if (!lower.includes(term)) continue;
+      hitCount += 1;
+      score += titleArea.includes(term) ? weight * TITLE_BOOST_MULTIPLIER : weight;
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      bestHitCount = hitCount;
       best = cat;
     }
   });
 
-  const confidence = bestHits === 0 ? 0.3 : Math.min(0.95, 0.5 + bestHits * 0.15);
+  const confidence = bestHitCount === 0 ? 0.3 : Math.min(0.97, 0.5 + bestScore * 0.12);
   return { category: best, confidence };
 }
 
@@ -73,11 +158,11 @@ const DATE_PATTERNS: { regex: RegExp; toISO: (m: RegExpMatchArray) => string | n
     },
   },
   {
-    regex: /\b(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{4})\b/gi,
+    regex: /\b(\d{1,2})[\s-]+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[\s-]+(\d{4})\b/gi,
     toISO: (m) => isoFromMonthName(m[2], m[1], m[3]),
   },
   {
-    regex: /\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{1,2}),?\s+(\d{4})\b/gi,
+    regex: /\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[\s-]+(\d{1,2}),?[\s-]+(\d{4})\b/gi,
     toISO: (m) => isoFromMonthName(m[1], m[2], m[3]),
   },
 ];
@@ -127,7 +212,15 @@ export function extractDates(text: string): ParsedDate[] {
       }
     }
   }
-  return results.filter((date, index, all) => all.findIndex((candidate) => candidate.value === date.value && candidate.kind === date.kind) === index);
+  // Set-based dedupe: the previous filter/findIndex pair was quadratic, and
+  // a dense document can produce hundreds of date matches.
+  const seenDates = new Set<string>();
+  return results.filter((date) => {
+    const key = `${date.value}|${date.kind}`;
+    if (seenDates.has(key)) return false;
+    seenDates.add(key);
+    return true;
+  });
 }
 
 function bestDateForText(text: string): string | undefined {
@@ -140,17 +233,30 @@ function removeDateTokens(text: string): string {
 }
 
 const FIELD_LABELS: Array<{ fieldName: string; labels: string[] }> = [
-  { fieldName: "patientId", labels: ["patient id", "patient no", "patient number", "mrn", "medical record number"] },
-  { fieldName: "patientName", labels: ["patient name", "name of patient"] },
-  { fieldName: "patientAge", labels: ["age", "patient age"] },
+  { fieldName: "patientId", labels: ["patient id", "patient no", "patient number", "mrn", "medical record number", "uhid", "registration no", "registration number"] },
+  { fieldName: "patientName", labels: ["patient name", "name of patient", "name"] },
+  { fieldName: "patientAge", labels: ["age", "patient age", "age/sex", "age / sex"] },
   { fieldName: "sex", labels: ["sex", "gender"] },
+  { fieldName: "bloodGroup", labels: ["blood group", "bloodgroup", "blood type"] },
+  { fieldName: "dateOfBirth", labels: ["date of birth", "dob", "birth date"] },
+  { fieldName: "contactNumber", labels: ["contact no", "contact number", "phone", "phone no", "mobile", "mobile no", "tel"] },
+  { fieldName: "address", labels: ["address", "patient address", "residential address"] },
   { fieldName: "symptoms", labels: ["symptoms", "presenting symptoms", "chief complaint", "complaint", "reason for visit"] },
-  { fieldName: "diagnosis", labels: ["diagnosis", "clinical diagnosis", "impression", "assessment"] },
-  { fieldName: "treatment", labels: ["treatment", "treatment plan", "management", "plan", "recommendations"] },
-  { fieldName: "medications", labels: ["medications", "medication", "prescription", "current medicines", "drug"] },
+  { fieldName: "diagnosis", labels: ["diagnosis", "clinical diagnosis", "provisional diagnosis", "impression", "assessment"] },
+  { fieldName: "treatment", labels: ["treatment", "treatment plan", "management", "plan", "recommendations", "advice"] },
+  { fieldName: "medications", labels: ["medications", "medication", "prescription", "current medicines", "drug", "medicines"] },
+  { fieldName: "dosageInstructions", labels: ["sig", "instructions", "directions", "how to take", "take as directed"] },
+  { fieldName: "duration", labels: ["duration", "course duration", "treatment duration"] },
   { fieldName: "allergies", labels: ["allergies", "drug allergies", "known allergies"] },
-  { fieldName: "doctor", labels: ["doctor", "physician", "consultant", "attending"] },
-  { fieldName: "facility", labels: ["hospital", "clinic", "facility", "laboratory", "lab"] },
+  { fieldName: "doctor", labels: ["doctor", "physician", "consultant", "attending", "referred by", "referring doctor", "referring physician", "ordering physician", "administered by", "vaccinator", "prescribed by"] },
+  { fieldName: "facility", labels: ["hospital", "clinic", "facility", "laboratory", "lab", "health center", "healthcare center", "vaccination center", "vaccination centre"] },
+  { fieldName: "reportNumber", labels: ["accession no", "accession number", "report no", "report number", "lab no", "lab number", "order no", "order number"] },
+  { fieldName: "specimenType", labels: ["specimen type", "sample type", "specimen", "sample"] },
+  { fieldName: "vaccineName", labels: ["vaccine name", "vaccine", "immunization type", "vaccine type"] },
+  { fieldName: "vaccineBatch", labels: ["batch no", "batch number", "lot no", "lot number"] },
+  { fieldName: "doseNumber", labels: ["dose number", "dose no"] },
+  { fieldName: "vaccinationSite", labels: ["injection site", "site of injection"] },
+  { fieldName: "nextDoseDate", labels: ["next dose date", "next dose due", "due date", "next appointment"] },
 ];
 
 const VITAL_LABELS: Array<{ fieldName: string; labels: string[]; pattern: RegExp }> = [
@@ -161,6 +267,7 @@ const VITAL_LABELS: Array<{ fieldName: string; labels: string[]; pattern: RegExp
   { fieldName: "vital.oxygenSaturation", labels: ["oxygen saturation", "spo2", "o2 saturation"], pattern: /\b(\d{2,3}(?:[.,]\d{1,2})?)\s*%/i },
   { fieldName: "vital.weight", labels: ["weight"], pattern: /\b(\d{1,3}(?:[.,]\d{1,2})?)\s*(kg|kgs?|lb|lbs?)\b/i },
   { fieldName: "vital.height", labels: ["height"], pattern: /\b(\d{2,3}(?:[.,]\d{1,2})?)\s*(cm|centimeters?|in|inches?)\b/i },
+  { fieldName: "vital.bmi", labels: ["bmi", "body mass index"], pattern: /\b(\d{1,2}(?:[.,]\d{1,2})?)\s*(?:kg\/m2|kg\/m\^2)?\b/i },
 ];
 
 const SECTION_BOUNDARY = /^(?:patient details?|demographics?|vitals?|vital signs?|symptoms?|chief complaint|diagnosis|assessment|impression|treatment|management|plan|medications?|prescription|allergies?|history|findings?|observations?|recommendations?)\s*[:\-]?\s*$/i;
@@ -177,9 +284,40 @@ function labelMatches(line: string, labels: string[]): boolean {
   return labels.some((label) => lower === label || lower.startsWith(`${label}:`) || lower.startsWith(`${label} -`));
 }
 
+// Compiled label matchers are cached and the label list is pre-sorted once.
+// Previously a fresh RegExp was constructed for every label, on every line,
+// for every field definition — and again for all ~70 labels on each of up
+// to five lookahead lines. On a 30-page document that is millions of regex
+// compilations, and it showed: extraction time grew super-linearly with
+// document length, inside a job that already holds the OCR lane.
+const LABEL_PATTERN_CACHE = new Map<string, RegExp>();
+
+function labelPattern(label: string): RegExp {
+  let pattern = LABEL_PATTERN_CACHE.get(label);
+  if (!pattern) {
+    pattern = new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*(?::|-)?\\s*(.+)$`, "i");
+    LABEL_PATTERN_CACHE.set(label, pattern);
+  }
+  return pattern;
+}
+
+const LABELS_BY_LENGTH = new WeakMap<string[], string[]>();
+
+function longestFirst(labels: string[]): string[] {
+  let sorted = LABELS_BY_LENGTH.get(labels);
+  if (!sorted) {
+    sorted = [...labels].sort((left, right) => right.length - left.length);
+    LABELS_BY_LENGTH.set(labels, sorted);
+  }
+  return sorted;
+}
+
+// Flattened once at module load rather than rebuilt per lookahead line.
+const ALL_FIELD_LABELS: string[] = FIELD_LABELS.flatMap((item) => item.labels);
+
 function valueAfterLabel(line: string, labels: string[]): string | null {
-  for (const label of [...labels].sort((left, right) => right.length - left.length)) {
-    const match = line.match(new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*(?::|-)?\\s*(.+)$`, "i"));
+  for (const label of longestFirst(labels)) {
+    const match = line.match(labelPattern(label));
     if (match?.[1]) return cleanFieldValue(match[1]);
   }
   return null;
@@ -190,18 +328,29 @@ function valueAfterLabel(line: string, labels: string[]): string | null {
  * labelled lines and bounded sections instead of guessing from free prose;
  * a wrong diagnosis is more harmful than leaving a field for review.
  */
+// Upper bounds for pathological input. A badly degraded scan can produce
+// tens of thousands of short junk lines; without a ceiling the parser
+// happily grinds through all of them inside the OCR lane.
+const MAX_LINES_TO_SCAN = 20_000;
+const MAX_LINE_LENGTH = 400;
+
 export function extractMedicalFields(text: string): ParsedMedicalField[] {
   const lines = text
     .replace(/\r/g, "")
     .split("\n")
-    .map((line) => cleanFieldValue(line))
-    .filter(Boolean);
+    .map((line) => cleanFieldValue(line.length > MAX_LINE_LENGTH ? line.slice(0, MAX_LINE_LENGTH) : line))
+    .filter(Boolean)
+    .slice(0, MAX_LINES_TO_SCAN);
   const results: ParsedMedicalField[] = [];
   const seen = new Set<string>();
 
   const add = (fieldName: string, value: string, confidence: number, normalizedValue?: string) => {
     const cleaned = cleanFieldValue(value);
-    if (cleaned.length < 2 || cleaned.length > 1000) return;
+    // A minimum length of 2 silently dropped perfectly valid single-character
+    // values — "Sex: M", "Dose Number: 2" — treating real extracted data as
+    // noise. Only reject a truly empty value; anything the label matched is
+    // worth surfacing for the user to confirm.
+    if (cleaned.length < 1 || cleaned.length > 1000) return;
     const key = `${fieldName}:${cleaned.toLowerCase()}`;
     if (seen.has(key)) return;
     seen.add(key);
@@ -217,7 +366,7 @@ export function extractMedicalFields(text: string): ParsedMedicalField[] {
       else if (labelMatches(line, definition.labels)) {
         const sectionLines: string[] = [];
         for (let next = index + 1; next < Math.min(lines.length, index + 5); next += 1) {
-          if (SECTION_BOUNDARY.test(lines[next]) || valueAfterLabel(lines[next], FIELD_LABELS.flatMap((item) => item.labels))) break;
+          if (SECTION_BOUNDARY.test(lines[next]) || valueAfterLabel(lines[next], ALL_FIELD_LABELS)) break;
           sectionLines.push(lines[next]);
         }
         if (sectionLines.length) add(definition.fieldName, sectionLines.join(" "), 0.68);
@@ -250,9 +399,12 @@ function correctOcrDigitConfusion(token: string): string {
   return token
     .replace(/[Il|](?=\d|\.\d)/g, "1") // leading I/l/| before a digit
     .replace(/(?<=\d)[Il|]/g, "1") // trailing I/l/| after a digit
-    .replace(/O/g, "0")
-    .replace(/(?<=\d)S(?=\d|$)/g, "5")
-    .replace(/(?<=\d)B(?=\d|$)/g, "8");
+    .replace(/[Oo]/g, "0") // capital and lowercase O both commonly misread for zero
+    .replace(/(?<=\d)S(?=[\d.]|$)/g, "5")
+    .replace(/(?<=\d)s(?=[\d.]|$)/g, "5")
+    .replace(/(?<=\d)B(?=[\d.]|$)/g, "8")
+    .replace(/(?<=\d)Z(?=[\d.]|$)/g, "2")
+    .replace(/(?<=\d)z(?=[\d.]|$)/g, "2");
 }
 
 function normalizeOcrNumber(token: string): string {
@@ -301,21 +453,42 @@ const NON_TEST_LABELS = new Set([
   "respiratory rate",
   "oxygen saturation",
   "spo2",
+  "bmi",
+  "blood group",
+  "date of birth",
+  "dob",
+  "contact no",
+  "contact number",
+  "phone",
+  "mobile",
+  "address",
+  "dose number",
+  "dose no",
+  "batch no",
+  "batch number",
+  "lot no",
+  "lot number",
+  "report no",
+  "report number",
+  "accession no",
+  "accession number",
+  "duration",
 ]);
 
 // Matches lines like "Hemoglobin 13.5 g/dL" or "Glucose: 95 mg/dL (70-110)"
 const TEST_VALUE_REGEX =
-  /^([A-Za-z][A-Za-z0-9 /()%._#-]{1,50}?)[\s:]{1,3}([-+]?[\dOISBl|]+(?:[.,][\dOISBl|]+)?)\s*([A-Za-z%\/µμ^0-9-]{0,15})\s*(?:\(?\s*(?:ref(?:erence)?\s*(?:range)?|normal|参考)?[:\s]*([<>]?\s*[\dOISBl|.,]+\s*(?:[-–]|to)\s*[<>]?\s*[\dOISBl|.,]+)\s*\)?)?\s*$/i;
+  /^([A-Za-z][A-Za-z0-9 /()%._#-]{1,50}?)[\s:]{1,3}([-+]?[\dOISBlZ|]+(?:[.,][\dOISBlZ|]+)?)\s*([A-Za-z%\/µμ^0-9-]{0,15})\s*(?:\(?\s*(?:ref(?:erence)?\s*(?:range)?|normal|参考)?[:\s]*([<>]?\s*[\dOISBlZ|.,]+\s*(?:[-–]|to)\s*[<>]?\s*[\dOISBlZ|.,]+)\s*\)?)?\s*$/i;
 
 const VALUE_RANGE_UNIT_REGEX =
-  /^([A-Za-z][A-Za-z0-9 /()%._#-]{1,50}?)\s+([-+]?[\dOISBl|]+(?:[.,][\dOISBl|]+)?)\s+([<>]?\s*[\dOISBl|.,]+\s*(?:[-–]|to)\s*[<>]?\s*[\dOISBl|.,]+)\s+([A-Za-z%\/µμ^0-9-]{1,15})$/i;
+  /^([A-Za-z][A-Za-z0-9 /()%._#-]{1,50}?)\s+([-+]?[\dOISBlZ|]+(?:[.,][\dOISBlZ|]+)?)\s+([<>]?\s*[\dOISBlZ|.,]+\s*(?:[-–]|to)\s*[<>]?\s*[\dOISBlZ|.,]+)\s+([A-Za-z%\/µμ^0-9-]{1,15})$/i;
 
 const UNIT_VALUE_RANGE_REGEX =
-  /^([A-Za-z][A-Za-z0-9 /()%._#-]{1,50}?)\s+([A-Za-z%\/µμ^0-9-]{1,15})\s+([-+]?[\dOISBl|]+(?:[.,][\dOISBl|]+)?)\s+([<>]?\s*[\dOISBl|.,]+\s*(?:[-–]|to)\s*[<>]?\s*[\dOISBl|.,]+)$/i;
+  /^([A-Za-z][A-Za-z0-9 /()%._#-]{1,50}?)\s+([A-Za-z%\/µμ^0-9-]{1,15})\s+([-+]?[\dOISBlZ|]+(?:[.,][\dOISBlZ|]+)?)\s+([<>]?\s*[\dOISBlZ|.,]+\s*(?:[-–]|to)\s*[<>]?\s*[\dOISBlZ|.,]+)$/i;
 
 export function extractTestValues(text: string): ParsedTestValue[] {
   const linesWithSource = text
     .split(/\r?\n/)
+    .slice(0, MAX_LINES_TO_SCAN)
     .map((rawLine) => ({ rawLine, line: rawLine.replace(/[|¦]/g, " ").replace(/[ \t]+/g, " ").trim() }))
     .filter((entry) => Boolean(entry.line));
   const lines = linesWithSource.map((entry) => entry.line);
@@ -368,7 +541,7 @@ export function extractTestValues(text: string): ParsedTestValue[] {
     const rawLine = linesWithSource[index]?.rawLine ?? "";
     const tableCells = rawLine.split(/[|¦]/).map((cell) => cell.trim()).filter(Boolean);
     if (tableCells.length >= 3) {
-      const tableValueIndex = tableCells.findIndex((cell) => /^[+-]?[\dOISBl|]+(?:[.,][\dOISBl|]+)?$/i.test(cell));
+      const tableValueIndex = tableCells.findIndex((cell) => /^[+-]?[\dOISBlZ|]+(?:[.,][\dOISBlZ|]+)?$/i.test(cell));
       if (tableValueIndex > 0) {
         const tableName = tableCells[tableValueIndex - 1];
         const tableValue = tableCells[tableValueIndex];
@@ -385,19 +558,33 @@ export function extractTestValues(text: string): ParsedTestValue[] {
     if (direct) results.push(direct);
 
     // Tesseract may place a label, value, and unit on separate rows. Join a
-    // small window only when the direct row did not already yield a value.
+    // small window only when the direct row did not already yield a value
+    // AND the very next line does not already parse as a complete, valid
+    // test entry on its own — otherwise a preceding title/header line (e.g.
+    // a "Laboratory Report" caption sitting above "Hemoglobin 13.5 g/dL")
+    // gets wrongly fused into the test name of the line below it, producing
+    // a bogus duplicate entry alongside the correct one.
     if (!direct && !/\d/.test(lines[index])) {
-      let bestJoined: ParsedTestValue | null = null;
-      for (let width = 2; width <= 3 && index + width <= lines.length; width += 1) {
-        const joined = parseLine(lines.slice(index, index + width).join(" "), -0.08);
-        if (joined && (!bestJoined || (joined.unit ? 1 : 0) > (bestJoined.unit ? 1 : 0))) bestJoined = joined;
+      const nextLineAlone = index + 1 < lines.length ? parseLine(lines[index + 1]) : null;
+      if (!nextLineAlone) {
+        let bestJoined: ParsedTestValue | null = null;
+        for (let width = 2; width <= 3 && index + width <= lines.length; width += 1) {
+          const joined = parseLine(lines.slice(index, index + width).join(" "), -0.08);
+          if (joined && (!bestJoined || (joined.unit ? 1 : 0) > (bestJoined.unit ? 1 : 0))) bestJoined = joined;
+        }
+        if (bestJoined) results.push(bestJoined);
       }
-      if (bestJoined) results.push(bestJoined);
     }
   }
 
-  return results.filter((value, index, all) => {
+  // Set-based dedupe. The previous filter/findIndex pair rebuilt the key for
+  // every pair of results — quadratic in the number of extracted values, and
+  // a noisy multi-page scan is exactly where that count explodes.
+  const seenValues = new Set<string>();
+  return results.filter((value) => {
     const key = `${value.testName.toLowerCase()}|${value.numericValue}|${value.unit?.toLowerCase() ?? ""}|${value.referenceRangeText ?? ""}`;
-    return all.findIndex((candidate) => `${candidate.testName.toLowerCase()}|${candidate.numericValue}|${candidate.unit?.toLowerCase() ?? ""}|${candidate.referenceRangeText ?? ""}` === key) === index;
+    if (seenValues.has(key)) return false;
+    seenValues.add(key);
+    return true;
   });
 }

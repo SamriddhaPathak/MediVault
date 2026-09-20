@@ -12,6 +12,13 @@ interface ImageRecord extends Report {
 
 type ViewFilter = "all" | "verified" | "review";
 
+// The vault fetches one large page rather than paginating (it's meant to
+// be a browsable grid, not a list) — this cap keeps that request bounded.
+// If a user's total report count exceeds it, `truncated` below drives a
+// disclosure banner rather than silently hiding records with no
+// indication anything was left out.
+const FETCH_PAGE_SIZE = 500;
+
 const CATEGORY_LABELS: Record<ReportCategory, string> = {
   LABORATORY: "Laboratory",
   PRESCRIPTION: "Prescriptions",
@@ -30,12 +37,14 @@ export default function ImageVault() {
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [truncated, setTruncated] = useState(false);
 
   async function load() {
     setLoading(true);
     setError(null);
     try {
-      const response = await api.get("/reports", { params: { page: 1, pageSize: 100, sort: "newest" } });
+      const response = await api.get("/reports", { params: { page: 1, pageSize: FETCH_PAGE_SIZE, sort: "newest" } });
+      setTruncated((response.data.total ?? 0) > FETCH_PAGE_SIZE);
       const reports = (response.data.items as Report[]).filter((report) => report.mimeType?.startsWith("image/"));
       const withUrls = await Promise.all(
         reports.map(async (report) => {
@@ -107,6 +116,12 @@ export default function ImageVault() {
           </select>
         </div>
       </div>
+
+      {truncated && !loading && !error && (
+        <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          Showing your most recent {FETCH_PAGE_SIZE} records. Use Records for your full, searchable history.
+        </p>
+      )}
 
       {loading && <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"><SkeletonCards /></div>}
       {!loading && error && <ErrorState message={error} onRetry={load} />}

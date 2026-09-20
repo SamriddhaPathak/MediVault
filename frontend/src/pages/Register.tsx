@@ -28,7 +28,7 @@ export default function Register() {
           <div>
             <img src="/medivault-cropped.png" alt="MediVault" className="h-16 w-60 rounded bg-white/95 px-3 object-contain object-left" />
             <p className="mt-24 max-w-xs text-3xl font-semibold leading-tight">Your health history deserves a clear home.</p>
-            <p className="mt-4 max-w-xs text-sm leading-6 text-[#b8d2d0]">Start with one secure place for your reports, trends, and personal health profile.</p>
+            <p className="mt-4 max-w-xs text-sm leading-6 text-[#b8d2d0]">Start with one secure place for your reports and personal health profile.</p>
           </div>
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#86b8b0]">Private by design · built for clarity</p>
         </div>

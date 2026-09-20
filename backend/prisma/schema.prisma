@@ -82,6 +82,14 @@ model Report {
   ocrConfidence   Float?
   extractedText   String?
   failureReason   String?
+  // Non-fatal notices from a successful extraction (page limit reached,
+  // extracted-value cap hit). Distinct from failureReason, which is only
+  // surfaced for OCR_FAILED reports.
+  processingNotice String?
+  // How many times OCR has been run for this report. Used to bound
+  // automatic reprocessing after a restart so a file that reliably crashes
+  // the pipeline cannot loop forever.
+  ocrAttempts     Int      @default(0)
   editedByUser    Boolean  @default(false)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt

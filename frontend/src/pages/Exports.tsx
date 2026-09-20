@@ -8,6 +8,13 @@ import { useToast } from "../components/ToastProvider";
 
 type JobStatus = "PENDING" | "PROCESSING" | "READY" | "FAILED" | "EXPIRED";
 
+// Reports are fetched as one large page for the selection list below rather
+// than paginated — this cap keeps that request bounded while comfortably
+// covering typical accounts. `truncated` drives a disclosure banner if a
+// user's total report count ever exceeds it, so older reports are never
+// silently unselectable with no indication why.
+const FETCH_PAGE_SIZE = 500;
+
 export default function Exports() {
   const { showToast } = useToast();
   const [reports, setReports] = useState<Report[]>([]);
@@ -17,13 +24,15 @@ export default function Exports() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [truncated, setTruncated] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
     try {
-      const res = await api.get("/reports", { params: { page: 1, pageSize: 100, sort: "newest" } });
+      const res = await api.get("/reports", { params: { page: 1, pageSize: FETCH_PAGE_SIZE, sort: "newest" } });
       setReports(res.data.items);
+      setTruncated((res.data.total ?? 0) > FETCH_PAGE_SIZE);
     } catch (err: any) {
       setLoadError(err?.response?.data?.error ?? "We couldn't load your reports. Please try again.");
     } finally {
@@ -133,6 +142,12 @@ export default function Exports() {
                 </button>
               </div>
             </div>
+          )}
+
+          {truncated && (
+            <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              Showing your most recent {FETCH_PAGE_SIZE} reports for export selection.
+            </p>
           )}
 
           <div className="surface space-y-2 p-4">

@@ -5,6 +5,7 @@ import { ExtractedField, Report, TestValue } from "../types";
 import StatusBadge from "../components/StatusBadge";
 import SourceTag from "../components/SourceTag";
 import PageHeader from "../components/PageHeader";
+import DocumentPreview from "../components/DocumentPreview";
 import ErrorState from "../components/ErrorState";
 import ConfirmDialog from "../components/ConfirmDialog";
 import ConfidenceBadge from "../components/ConfidenceBadge";
@@ -23,6 +24,7 @@ export default function RecordDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [reprocessing, setReprocessing] = useState(false);
 
   useEffect(() => {
     load();
@@ -47,6 +49,19 @@ export default function RecordDetail() {
       );
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function reprocess() {
+    setReprocessing(true);
+    try {
+      await api.post(`/reports/${id}/reprocess`);
+      showToast("Processing this document again. This page will update when it finishes.");
+      await load();
+    } catch (err: any) {
+      showToast(err?.response?.data?.error ?? "We couldn't start processing again.", "error");
+    } finally {
+      setReprocessing(false);
     }
   }
 
@@ -104,6 +119,15 @@ export default function RecordDetail() {
                 Edit
               </Link>
             )}
+            {report.status !== "ARCHIVED" && report.status !== "PROCESSING" && (
+              <button
+                onClick={reprocess}
+                disabled={reprocessing}
+                className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+              >
+                {reprocessing ? "Starting..." : "Run OCR again"}
+              </button>
+            )}
             {report.status !== "ARCHIVED" && (
               <button
                 onClick={archive}
@@ -156,14 +180,24 @@ export default function RecordDetail() {
             </p>
           )}
 
+          {/* A successful extraction can still be partial — a PDF longer
+              than the page limit, or a table that hit the extracted-value
+              cap. Saying so is the difference between a known limitation
+              and a silently incomplete medical record. */}
+          {report.processingNotice && (
+            <p role="status" className="rounded-lg border border-[#cbdedb] bg-[#f3f9f7] px-3 py-2 text-sm text-[#365861]">
+              {report.processingNotice}
+            </p>
+          )}
+
+          {report.status === "PROCESSING" && (
+            <p role="status" className="rounded-lg border border-[#cbdedb] bg-[#f3f9f7] px-3 py-2 text-sm text-[#365861]">
+              This document is being processed. Reload in a moment to see the extracted information.
+            </p>
+          )}
+
           {fileUrl && (
-            <div className="surface overflow-hidden">
-              {report.name.toLowerCase().endsWith(".pdf") ? (
-                <iframe src={fileUrl} title="Original document" className="h-96 w-full" />
-              ) : (
-                <img src={fileUrl} alt="Original report" className="max-h-96 w-full object-contain" />
-              )}
-            </div>
+            <DocumentPreview report={report} fileUrl={fileUrl} />
           )}
         </div>
 
@@ -250,6 +284,19 @@ function formatFieldName(fieldName: string): string {
     allergies: "Allergies",
     doctor: "Doctor",
     facility: "Facility",
+    bloodGroup: "Blood group",
+    dateOfBirth: "Date of birth",
+    contactNumber: "Contact number",
+    address: "Address",
+    dosageInstructions: "Dosage instructions",
+    duration: "Duration",
+    reportNumber: "Report / accession number",
+    specimenType: "Specimen type",
+    vaccineName: "Vaccine name",
+    vaccineBatch: "Batch / lot number",
+    doseNumber: "Dose number",
+    vaccinationSite: "Injection site",
+    nextDoseDate: "Next dose due",
     "vital.bloodPressure": "Blood pressure",
     "vital.heartRate": "Heart rate",
     "vital.temperature": "Temperature",
@@ -257,6 +304,7 @@ function formatFieldName(fieldName: string): string {
     "vital.oxygenSaturation": "Oxygen saturation",
     "vital.weight": "Weight",
     "vital.height": "Height",
+    "vital.bmi": "BMI",
   };
   return labels[fieldName] ?? fieldName.replace(/[._]/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }

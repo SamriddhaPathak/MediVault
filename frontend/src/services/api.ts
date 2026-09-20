@@ -4,7 +4,18 @@ export const api = axios.create({ baseURL: "/api" });
 
 function getStoredTokens() {
   const raw = localStorage.getItem("mv_tokens");
-  return raw ? (JSON.parse(raw) as { accessToken: string; refreshToken: string }) : null;
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as { accessToken: string; refreshToken: string };
+  } catch {
+    // Malformed stored value (corrupted write, manual tampering, a stale
+    // shape from an older app version) — treat it as "not signed in"
+    // rather than letting JSON.parse throw synchronously inside the
+    // request interceptor, which would break every API call for the rest
+    // of the session.
+    localStorage.removeItem("mv_tokens");
+    return null;
+  }
 }
 
 function storeTokens(tokens: { accessToken: string; refreshToken: string } | null) {
