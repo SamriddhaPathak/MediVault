@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { api } from "../services/api";
+import { api, getErrorMessage } from "../services/api";
 import { ExtractedField, Report, TestValue } from "../types";
 import StatusBadge from "../components/StatusBadge";
 import SourceTag from "../components/SourceTag";
@@ -11,6 +11,7 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import ConfidenceBadge from "../components/ConfidenceBadge";
 import { SkeletonBlock } from "../components/Skeleton";
 import { useToast } from "../components/ToastProvider";
+import { formatCategory } from "../lib/categories";
 
 export default function RecordDetail() {
   const { id } = useParams<{ id: string }>();
@@ -45,7 +46,7 @@ export default function RecordDetail() {
       setError(
         err?.response?.status === 404
           ? "This report could not be found. It may have been deleted."
-          : err?.response?.data?.error ?? "We couldn't load this report. Please try again."
+          : getErrorMessage(err, "We couldn't load this report. Please try again.")
       );
     } finally {
       setLoading(false);
@@ -59,7 +60,7 @@ export default function RecordDetail() {
       showToast("Processing this document again. This page will update when it finishes.");
       await load();
     } catch (err: any) {
-      showToast(err?.response?.data?.error ?? "We couldn't start processing again.", "error");
+      showToast(getErrorMessage(err, "We couldn't start processing again."), "error");
     } finally {
       setReprocessing(false);
     }
@@ -71,7 +72,7 @@ export default function RecordDetail() {
       showToast("Report archived.");
       load();
     } catch (err: any) {
-      showToast(err?.response?.data?.error ?? "We couldn't archive this report.", "error");
+      showToast(getErrorMessage(err, "We couldn't archive this report."), "error");
     }
   }
 
@@ -82,7 +83,7 @@ export default function RecordDetail() {
       showToast("Report deleted.");
       navigate("/records");
     } catch (err: any) {
-      showToast(err?.response?.data?.error ?? "We couldn't delete this report.", "error");
+      showToast(getErrorMessage(err, "We couldn't delete this report."), "error");
     }
   }
 
@@ -114,7 +115,7 @@ export default function RecordDetail() {
             {report.status !== "VERIFIED" && (
               <Link
                 to={`/records/${id}/review`}
-                className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                className="rounded-lg border border-[#cbdedb] px-3 py-1.5 text-sm font-bold text-[#365861] hover:bg-[#f3f9f7]"
               >
                 Edit
               </Link>
@@ -123,7 +124,7 @@ export default function RecordDetail() {
               <button
                 onClick={reprocess}
                 disabled={reprocessing}
-                className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                className="rounded-lg border border-[#cbdedb] px-3 py-1.5 text-sm font-bold text-[#365861] hover:bg-[#f3f9f7] disabled:opacity-60"
               >
                 {reprocessing ? "Starting..." : "Run OCR again"}
               </button>
@@ -131,7 +132,7 @@ export default function RecordDetail() {
             {report.status !== "ARCHIVED" && (
               <button
                 onClick={archive}
-                className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                className="rounded-lg border border-[#cbdedb] px-3 py-1.5 text-sm font-bold text-[#365861] hover:bg-[#f3f9f7]"
               >
                 Archive
               </button>
@@ -148,7 +149,7 @@ export default function RecordDetail() {
 
       <div className="mb-4 flex items-center gap-2">
         <StatusBadge status={report.status} />
-        <span className="text-xs text-gray-500">{report.category}</span>
+        <span className="text-xs text-gray-500">{formatCategory(report.category)}</span>
         {report.editedByUser && <span className="text-xs text-gray-400">· Edited by you</span>}
       </div>
 
@@ -164,11 +165,11 @@ export default function RecordDetail() {
           <div className="surface p-4 text-sm">
             <dl className="grid grid-cols-2 gap-y-2">
               <dt className="text-gray-500">Report Date</dt>
-              <dd className="text-gray-900">{report.reportDate ? new Date(report.reportDate).toLocaleDateString() : "—"}</dd>
+              <dd className="text-gray-900">{report.reportDate ? new Date(report.reportDate).toLocaleDateString() : "–"}</dd>
               <dt className="text-gray-500">Uploaded</dt>
               <dd className="text-gray-900">{new Date(report.uploadTime).toLocaleDateString()}</dd>
               <dt className="text-gray-500">OCR Confidence</dt>
-              <dd className="text-gray-900">{report.ocrConfidence != null ? `${Math.round(report.ocrConfidence * 100)}%` : "—"}</dd>
+              <dd className="text-gray-900">{report.ocrConfidence != null ? `${Math.round(report.ocrConfidence * 100)}%` : "–"}</dd>
               <dt className="text-gray-500">Verified</dt>
               <dd className="text-gray-900">{report.verifiedAt ? new Date(report.verifiedAt).toLocaleDateString() : "Not yet"}</dd>
             </dl>
@@ -180,7 +181,7 @@ export default function RecordDetail() {
             </p>
           )}
 
-          {/* A successful extraction can still be partial — a PDF longer
+          {/* A successful extraction can still be partial: a PDF longer
               than the page limit, or a table that hit the extracted-value
               cap. Saying so is the difference between a known limitation
               and a silently incomplete medical record. */}
@@ -225,7 +226,7 @@ export default function RecordDetail() {
                         <td className="py-1.5 pr-2">
                           {tv.numericValue} {tv.unit}
                         </td>
-                        <td className="py-1.5 pr-2 text-gray-500">{tv.referenceRangeText ?? "—"}</td>
+                        <td className="py-1.5 pr-2 text-gray-500">{tv.referenceRangeText ?? "–"}</td>
                         <td className="py-1.5 pr-2 text-gray-500">{new Date(tv.recordedDate).toLocaleDateString()}</td>
                         <td className="py-1.5">
                           <ConfidenceBadge confidence={tv.source === "ocr" ? tv.confidence : null} />

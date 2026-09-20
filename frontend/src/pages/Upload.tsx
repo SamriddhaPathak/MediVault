@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { api } from "../services/api";
+import { api, getErrorMessage } from "../services/api";
 import { Report } from "../types";
 import { useToast } from "../components/ToastProvider";
 import ConfidenceBadge from "../components/ConfidenceBadge";
@@ -21,7 +21,7 @@ export default function Upload() {
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
-  // Tracks the active polling interval so it can be torn down on unmount —
+  // Tracks the active polling interval so it can be torn down on unmount:
   // without this, navigating away mid-upload left a setInterval running
   // forever in the background, hitting the API every 1.5s and leaking.
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -74,13 +74,13 @@ export default function Upload() {
         showToast(
           `This looks like the same file as "${res.data.duplicateOf.name}", uploaded ${new Date(
             res.data.duplicateOf.uploadTime
-          ).toLocaleDateString()}. Both are kept — you can delete either from Records.`,
+          ).toLocaleDateString()}. Both are kept – you can delete either from Records.`,
           "info"
         );
       }
       pollStatus(res.data.report.id);
     } catch (err: any) {
-      setError(err?.response?.data?.error ?? "We couldn't upload this file. Please check the file type and size and try again.");
+      setError(getErrorMessage(err, "We couldn't upload this file. Please check the file type and size and try again."));
       setStage("error");
     }
   }
@@ -89,7 +89,7 @@ export default function Upload() {
     if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
     setPollError(null);
     // A single dropped request (a brief network blip, a proxy timeout) must
-    // not silently strand the user on "Processing..." forever — that was
+    // not silently strand the user on "Processing..." forever; that was
     // the previous behavior: the first failed poll cleared the interval
     // with no feedback and no way to recover short of reloading. Instead,
     // tolerate a few consecutive failures before giving up, and when we do
@@ -113,7 +113,7 @@ export default function Upload() {
         if (!stuckNoticeShown && Date.now() - started > STUCK_THRESHOLD_MS) {
           stuckNoticeShown = true;
           setPollError(
-            "This is taking longer than usual. We'll keep trying — you can also check back later from Records."
+            "This is taking longer than usual. We'll keep trying – you can also check back later from Records."
           );
         }
       } catch {
@@ -121,7 +121,7 @@ export default function Upload() {
         if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
           if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
           setPollError(
-            "We're having trouble checking your report's status. It's still processing — you can find it in Records shortly."
+            "We're having trouble checking your report's status. It's still processing – you can find it in Records shortly."
           );
         }
       }
@@ -137,7 +137,7 @@ export default function Upload() {
       pollStatus(report.id);
       showToast("Processing this document again.");
     } catch (err: any) {
-      showToast(err?.response?.data?.error ?? "We couldn't start processing again. Please try once more.", "error");
+      showToast(getErrorMessage(err, "We couldn't start processing again. Please try once more."), "error");
     }
   }
 
@@ -291,7 +291,7 @@ function ProcessingView({
         </p>
         <div className="flex flex-col gap-2 pt-2">
           {/* OCR can fail for reasons that have nothing to do with the
-              document — a timeout under load, a restart mid-job, the
+              document: a timeout under load, a restart mid-job, the
               language model still warming up. Without this button the only
               remedy was deleting the report and uploading the same file
               again. */}
@@ -334,14 +334,14 @@ function ProcessingView({
             <span
               aria-hidden="true"
               className={`flex h-5 w-5 items-center justify-center rounded-full text-xs ${
-                s.done ? "bg-brand-600 text-white" : "border border-gray-300 text-transparent"
+                s.done ? "bg-brand-600 text-white" : "border border-[#cbdedb] text-transparent"
               }`}
             >
               {s.done ? "✓" : "○"}
             </span>
             <span className={s.done ? "text-gray-900" : "text-gray-400"}>
               {s.label}
-              {s.done && <span className="sr-only"> — complete</span>}
+              {s.done && <span className="sr-only"> - complete</span>}
             </span>
           </li>
         ))}

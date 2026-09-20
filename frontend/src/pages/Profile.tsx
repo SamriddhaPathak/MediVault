@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
-import { api } from "../services/api";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { api, getErrorMessage } from "../services/api";
 import { HealthProfile } from "../types";
 import { useAuth } from "../auth/AuthContext";
 import { useToast } from "../components/ToastProvider";
@@ -8,8 +8,9 @@ import ErrorState from "../components/ErrorState";
 import { SkeletonBlock } from "../components/Skeleton";
 
 export default function Profile() {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const { showToast } = useToast();
+  const navigate = useNavigate();
   const [params] = useSearchParams();
   const [profile, setProfile] = useState<HealthProfile>({});
   const [editing, setEditing] = useState(params.get("onboarding") === "1");
@@ -19,6 +20,10 @@ export default function Profile() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [photoBusy, setPhotoBusy] = useState(false);
   const photoInputRef = useRef<HTMLInputElement>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     load();
@@ -31,7 +36,7 @@ export default function Profile() {
       const res = await api.get("/profile");
       if (res.data.profile) setProfile(res.data.profile);
     } catch (err: any) {
-      setLoadError(err?.response?.data?.error ?? "We couldn't load your profile. Please try again.");
+      setLoadError(getErrorMessage(err, "We couldn't load your profile. Please try again."));
     } finally {
       setLoading(false);
     }
@@ -46,7 +51,7 @@ export default function Profile() {
       setEditing(false);
       showToast("Profile updated.");
     } catch (err: any) {
-      setSaveError(err?.response?.data?.error ?? "We couldn't save your profile. Please try again.");
+      setSaveError(getErrorMessage(err, "We couldn't save your profile. Please try again."));
     } finally {
       setSaving(false);
     }
@@ -66,7 +71,7 @@ export default function Profile() {
       setProfile(res.data.profile);
       showToast("Profile photo updated.");
     } catch (err: any) {
-      setSaveError(err?.response?.data?.error ?? "We couldn't update your profile photo.");
+      setSaveError(getErrorMessage(err, "We couldn't update your profile photo."));
     } finally {
       setPhotoBusy(false);
     }
@@ -80,13 +85,49 @@ export default function Profile() {
       setProfile((current) => ({ ...current, profilePhotoUrl: null }));
       showToast("Profile photo removed.");
     } catch (err: any) {
-      setSaveError(err?.response?.data?.error ?? "We couldn't remove your profile photo.");
+      setSaveError(getErrorMessage(err, "We couldn't remove your profile photo."));
     } finally {
       setPhotoBusy(false);
     }
   }
 
+  function closeDeleteDialog() {
+    if (deleteBusy) return;
+    setDeleteOpen(false);
+    setDeletePassword("");
+    setDeleteError(null);
+  }
+
+  async function deleteAccount() {
+    if (!deletePassword) {
+      setDeleteError("Enter your password to confirm.");
+      return;
+    }
+    setDeleteBusy(true);
+    setDeleteError(null);
+    try {
+      await api.delete("/profile", { data: { password: deletePassword } });
+      await logout();
+      navigate("/login?accountDeleted=1", { replace: true });
+    } catch (err: any) {
+      setDeleteError(getErrorMessage(err, "We couldn't delete your account. Please try again."));
+      setDeleteBusy(false);
+    }
+  }
+
   const initials = (profile.displayName || user?.email || "M").slice(0, 1).toUpperCase();
+
+  const completenessFields: Array<[string, unknown]> = [
+    ["Display name", profile.displayName],
+    ["Phone number", profile.phone],
+    ["Age", profile.age],
+    ["Blood group", profile.bloodGroup],
+    ["Emergency contact", profile.emergencyContact],
+    ["Allergies", profile.allergies],
+    ["Known conditions", profile.knownConditions],
+  ];
+  const completedCount = completenessFields.filter(([, value]) => value !== undefined && value !== null && value !== "").length;
+  const completenessPct = Math.round((completedCount / completenessFields.length) * 100);
 
   if (loading) {
     return (
@@ -147,10 +188,22 @@ export default function Profile() {
               <input ref={photoInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(e) => e.target.files?.[0] && uploadPhoto(e.target.files[0])} />
               <h2 className="mt-4 text-xl font-bold text-[#173b45]">{profile.displayName || "Your name"}</h2>
               <p className="mt-1 text-sm text-gray-500">{user?.email}</p>
-              <p className="mt-4 text-xs leading-5 text-gray-400">Use a clear photo so your account is easy to recognize when managing shared care records.</p>
+              {!editing && completedCount < completenessFields.length ? (
+                <div className="mt-4">
+                  <div className="mb-1.5 flex items-center justify-between text-xs">
+                    <span className="font-bold text-[#365861]">Profile completeness</span>
+                    <span className="text-gray-400">{completedCount} of {completenessFields.length} details</span>
+                  </div>
+                  <div className="h-1.5 rounded-full bg-[#eef3f2]">
+                    <div className="h-1.5 rounded-full bg-brand-500" style={{ width: `${Math.max(6, completenessPct)}%` }} />
+                  </div>
+                </div>
+              ) : (
+                <p className="mt-4 text-xs leading-5 text-gray-400">Use a clear photo so your account is easy to recognize when managing shared care records.</p>
+              )}
             </div>
           </section>
-          {!editing && <section className="surface p-5"><p className="eyebrow mb-3">Health snapshot</p><div className="grid grid-cols-2 gap-3"><Snapshot label="Age" value={profile.age ?? "—"} /><Snapshot label="Blood group" value={profile.bloodGroup || "—"} /><Snapshot label="Units" value={profile.preferredUnits === "imperial" ? "Imperial" : "Metric"} /><Snapshot label="Phone" value={profile.phone || "—"} /></div></section>}
+          {!editing && <section className="surface p-5"><p className="eyebrow mb-3">Health snapshot</p><div className="grid grid-cols-2 gap-3"><Snapshot label="Age" value={profile.age ?? "–"} /><Snapshot label="Blood group" value={profile.bloodGroup || "–"} /><Snapshot label="Units" value={profile.preferredUnits === "imperial" ? "Imperial" : "Metric"} /><Snapshot label="Phone" value={profile.phone || "–"} /></div></section>}
         </div>
 
         <section className="surface p-5 sm:p-6">
@@ -174,6 +227,20 @@ export default function Profile() {
               <Field label="Allergies" htmlFor="profile-allergies"><textarea id="profile-allergies" value={profile.allergies ?? ""} onChange={(e) => setProfile((p) => ({ ...p, allergies: e.target.value }))} className="profile-input" rows={2} placeholder="List allergies or write none" /></Field>
               <Field label="Known conditions" htmlFor="profile-conditions"><textarea id="profile-conditions" value={profile.knownConditions ?? ""} onChange={(e) => setProfile((p) => ({ ...p, knownConditions: e.target.value }))} className="profile-input" rows={2} placeholder="Optional" /></Field>
               <div className="flex flex-col-reverse gap-3 pt-2 sm:flex-row sm:justify-end"><button onClick={() => { setEditing(false); setSaveError(null); load(); }} className="rounded-xl border border-[#cbdedb] px-4 py-2.5 text-sm font-bold text-[#365861] hover:bg-gray-50">Cancel</button><button onClick={save} disabled={saving} className="rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-brand-700 disabled:opacity-60">{saving ? "Saving..." : "Save changes"}</button></div>
+
+              <div className="mt-2 rounded-xl border border-red-100 bg-red-50/60 p-4">
+                <p className="text-sm font-bold text-red-700">Danger zone</p>
+                <p className="mt-1 text-xs leading-5 text-red-700/80">
+                  Permanently delete your account, health profile, and every uploaded report, extracted value, and export. This can't be undone.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setDeleteOpen(true)}
+                  className="mt-3 rounded-xl border border-red-200 bg-white px-4 py-2 text-sm font-bold text-red-600 hover:bg-red-50"
+                >
+                  Delete account
+                </button>
+              </div>
             </div>
           )}
         </section>
@@ -182,6 +249,125 @@ export default function Profile() {
       <p className="text-center text-xs text-gray-400">
         MediVault does not automatically infer medical conditions from your uploaded reports.
       </p>
+
+      <DeleteAccountDialog
+        open={deleteOpen}
+        password={deletePassword}
+        busy={deleteBusy}
+        error={deleteError}
+        onPasswordChange={(value) => {
+          setDeletePassword(value);
+          if (deleteError) setDeleteError(null);
+        }}
+        onConfirm={deleteAccount}
+        onCancel={closeDeleteDialog}
+      />
+    </div>
+  );
+}
+
+/**
+ * Purpose-built confirmation dialog for account deletion: mirrors the
+ * shared ConfirmDialog's look and accessibility behavior (focus-on-open,
+ * Escape-to-close, backdrop click to cancel) but adds the password field
+ * this action requires, so a hijacked-but-unattended session can't be used
+ * to wipe the account without the credential (see profile.service.ts on
+ * the backend).
+ */
+function DeleteAccountDialog({
+  open,
+  password,
+  busy,
+  error,
+  onPasswordChange,
+  onConfirm,
+  onCancel,
+}: {
+  open: boolean;
+  password: string;
+  busy: boolean;
+  error: string | null;
+  onPasswordChange: (value: string) => void;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const passwordRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (open) passwordRef.current?.focus();
+  }, [open]);
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape" && !busy) onCancel();
+    }
+    if (open) document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [open, busy, onCancel]);
+
+  if (!open) return null;
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="delete-account-title"
+      aria-describedby="delete-account-description"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+      onClick={() => !busy && onCancel()}
+    >
+      <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <h2 id="delete-account-title" className="text-base font-semibold text-gray-900">
+          Delete your account?
+        </h2>
+        <p id="delete-account-description" className="mt-1.5 text-sm text-gray-500">
+          This permanently deletes your account, health profile, and every uploaded report, extracted value, and export. This can't be undone.
+        </p>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!busy) onConfirm();
+          }}
+        >
+          <div className="mt-4">
+            <label htmlFor="delete-password" className="mb-1 block text-sm font-medium text-gray-700">
+              Enter your password to confirm
+            </label>
+            <input
+              ref={passwordRef}
+              id="delete-password"
+              type="password"
+              value={password}
+              onChange={(e) => onPasswordChange(e.target.value)}
+              className="profile-input"
+              autoComplete="current-password"
+              aria-invalid={Boolean(error)}
+            />
+            {error && (
+              <p role="alert" className="mt-2 text-sm text-red-600">
+                {error}
+              </p>
+            )}
+          </div>
+          <div className="mt-5 flex gap-3">
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={busy}
+              className="flex-1 rounded-lg border border-[#cbdedb] py-2.5 text-sm font-bold text-[#365861] hover:bg-[#f3f9f7] disabled:opacity-60"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={busy || !password}
+              className="flex-1 rounded-lg bg-red-600 py-2.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-60"
+            >
+              {busy ? "Deleting..." : "Delete account"}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

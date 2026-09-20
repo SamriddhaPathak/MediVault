@@ -4,16 +4,34 @@ import { logger } from "./utils/logger";
 import { ocrService } from "./services/ocr.service";
 import { queue } from "./jobs/queue";
 import { recoverInterruptedJobs } from "./jobs/recovery";
+import { ensureSchemaIsCurrent } from "./config/ensureSchema";
 
-const app = createApp();
+async function main() {
+  // Runs before the port opens, not after, so no request can race in during
+  // the check and hit a table that is still missing columns.
+  // ensureSchemaIsCurrent() calls process.exit(1) itself on an
+  // unrecoverable mismatch — a schema problem stops the server here, with a
+  // clear log line, rather than surfacing later as a random 500 on whatever
+  // request happens to touch the drifted table first.
+  await ensureSchemaIsCurrent();
 
-const httpServer = app.listen(env.port, () => {
-  logger.info(`MediVault API listening on port ${env.port}`, { env: env.nodeEnv });
+  const app = createApp();
 
-  // The in-process queue is not durable, so anything that was queued or
-  // running when this process last stopped needs picking back up. Without
-  // this, a restart mid-OCR strands the report in PROCESSING permanently.
-  void recoverInterruptedJobs();
+  const httpServer = app.listen(env.port, () => {
+    logger.info(`MediVault API listening on port ${env.port}`, { env: env.nodeEnv });
+
+    // The in-process queue is not durable, so anything that was queued or
+    // running when this process last stopped needs picking back up. Without
+    // this, a restart mid-OCR strands the report in PROCESSING permanently.
+    void recoverInterruptedJobs();
+  });
+
+  return httpServer;
+}
+
+const httpServerPromise = main().catch((err) => {
+  logger.error("Server failed to start", { error: err instanceof Error ? err.message : String(err) });
+  process.exit(1);
 });
 
 let shuttingDown = false;
@@ -34,7 +52,18 @@ async function shutdown(signal: string) {
   shuttingDown = true;
   logger.info(`Received ${signal}, shutting down`);
 
-  httpServer.close();
+  // If a signal arrives while the schema check or initial listen() is still
+  // in flight, wait for that to settle before trying to close a server that
+  // does not exist yet — closing `undefined` would throw and skip the rest
+  // of this cleanup.
+  try {
+    const httpServer = await httpServerPromise;
+    httpServer.close();
+  } catch (err) {
+    logger.error("Server never finished starting; skipping listener close", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 
   try {
     await queue.drain(15_000);

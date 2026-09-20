@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { api } from "../services/api";
+import { api, getErrorMessage } from "../services/api";
 import { Report, ReportCategory, ReportStatus } from "../types";
 import ErrorState from "../components/ErrorState";
 import { SkeletonBlock } from "../components/Skeleton";
 import StatusBadge from "../components/StatusBadge";
+import { EmptyVaultIllustration, NoResultsIllustration } from "../components/illustrations";
 
 interface ImageRecord extends Report {
   imageUrl: string;
@@ -13,7 +14,7 @@ interface ImageRecord extends Report {
 type ViewFilter = "all" | "verified" | "review";
 
 // The vault fetches one large page rather than paginating (it's meant to
-// be a browsable grid, not a list) — this cap keeps that request bounded.
+// be a browsable grid, not a list); this cap keeps that request bounded.
 // If a user's total report count exceeds it, `truncated` below drives a
 // disclosure banner rather than silently hiding records with no
 // indication anything was left out.
@@ -58,7 +59,7 @@ export default function ImageVault() {
       );
       setImages(withUrls.filter((image): image is ImageRecord => image !== null));
     } catch (err: any) {
-      setError(err?.response?.data?.error ?? "We couldn't load your image vault. Please try again.");
+      setError(getErrorMessage(err, "We couldn't load your image vault. Please try again."));
     } finally {
       setLoading(false);
     }
@@ -96,12 +97,15 @@ export default function ImageVault() {
         <Link to="/upload" className="rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:-translate-y-0.5 hover:bg-brand-700">+ Add image</Link>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-3">
-        <Summary label="Image records" value={images.length} />
-        <Summary label="Verified by you" value={verifiedCount} accent="brand" />
-        <Summary label="Needs review" value={images.length - verifiedCount} accent="amber" />
-      </div>
+      {!loading && images.length > 0 && (
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Summary label="Image records" value={images.length} />
+          <Summary label="Verified by you" value={verifiedCount} accent="brand" />
+          <Summary label="Needs review" value={images.length - verifiedCount} accent="amber" />
+        </div>
+      )}
 
+      {!loading && images.length > 0 && (
       <div className="surface space-y-4 p-4">
         <div className="flex flex-wrap gap-2" role="tablist" aria-label="Image status filter">
           <FilterButton active={filter === "all"} onClick={() => setFilter("all")}>All images</FilterButton>
@@ -116,6 +120,7 @@ export default function ImageVault() {
           </select>
         </div>
       </div>
+      )}
 
       {truncated && !loading && !error && (
         <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
@@ -126,7 +131,39 @@ export default function ImageVault() {
       {loading && <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"><SkeletonCards /></div>}
       {!loading && error && <ErrorState message={error} onRetry={load} />}
       {!loading && !error && groupedImages.length === 0 && (
-        <div className="surface p-12 text-center"><p className="text-base font-bold text-[#365861]">No image records match this view</p><p className="mt-1 text-sm text-gray-500">Upload a report image or change the filters to explore your vault.</p></div>
+        <div className="surface flex flex-col items-center px-6 py-14 text-center">
+          {images.length === 0 ? (
+            <>
+              <EmptyVaultIllustration className="h-28 w-28" />
+              <p className="mt-2 text-base font-bold text-[#365861]">No image records yet</p>
+              <p className="mt-1 max-w-xs text-sm text-gray-500">
+                Photos and scans you upload will appear here, grouped by what MediVault recognized in them.
+              </p>
+              <Link
+                to="/upload"
+                className="mt-5 rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-bold text-white shadow-sm hover:-translate-y-0.5 hover:bg-brand-700"
+              >
+                Upload an image
+              </Link>
+            </>
+          ) : (
+            <>
+              <NoResultsIllustration className="h-28 w-28" />
+              <p className="mt-2 text-base font-bold text-[#365861]">No image records match this view</p>
+              <p className="mt-1 max-w-xs text-sm text-gray-500">Try a different search term, or reset the filters.</p>
+              <button
+                onClick={() => {
+                  setFilter("all");
+                  setCategory("all");
+                  setSearch("");
+                }}
+                className="mt-5 rounded-xl border border-[#cbdedb] bg-white px-4 py-2.5 text-sm font-bold text-[#365861] hover:bg-[#f3f9f7]"
+              >
+                Reset filters
+              </button>
+            </>
+          )}
+        </div>
       )}
       {!loading && !error && groupedImages.map((group) => (
         <section key={group.category} aria-labelledby={`image-group-${group.category}`}>

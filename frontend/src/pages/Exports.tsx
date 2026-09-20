@@ -1,15 +1,18 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { api } from "../services/api";
+import { Link } from "react-router-dom";
+import { api, getErrorMessage } from "../services/api";
 import { Report } from "../types";
 import StatusBadge from "../components/StatusBadge";
 import ErrorState from "../components/ErrorState";
 import { SkeletonList } from "../components/Skeleton";
 import { useToast } from "../components/ToastProvider";
+import { formatCategory } from "../lib/categories";
+import { EmptyVaultIllustration } from "../components/illustrations";
 
 type JobStatus = "PENDING" | "PROCESSING" | "READY" | "FAILED" | "EXPIRED";
 
 // Reports are fetched as one large page for the selection list below rather
-// than paginated — this cap keeps that request bounded while comfortably
+// than paginated; this cap keeps that request bounded while comfortably
 // covering typical accounts. `truncated` drives a disclosure banner if a
 // user's total report count ever exceeds it, so older reports are never
 // silently unselectable with no indication why.
@@ -34,7 +37,7 @@ export default function Exports() {
       setReports(res.data.items);
       setTruncated((res.data.total ?? 0) > FETCH_PAGE_SIZE);
     } catch (err: any) {
-      setLoadError(err?.response?.data?.error ?? "We couldn't load your reports. Please try again.");
+      setLoadError(getErrorMessage(err, "We couldn't load your reports. Please try again."));
     } finally {
       setLoading(false);
     }
@@ -83,7 +86,7 @@ export default function Exports() {
       setJobId(res.data.exportJob.id);
       setJobStatus(res.data.exportJob.status);
     } catch (err: any) {
-      setError(err?.response?.data?.error ?? "We couldn't generate your PDF. Please try again.");
+      setError(getErrorMessage(err, "We couldn't generate your PDF. Please try again."));
     }
   }
 
@@ -99,7 +102,7 @@ export default function Exports() {
       URL.revokeObjectURL(url);
       showToast("Download started.");
     } catch (err: any) {
-      showToast(err?.response?.data?.error ?? "We couldn't download your export.", "error");
+      showToast(getErrorMessage(err, "We couldn't download your export."), "error");
     }
   }
 
@@ -130,53 +133,68 @@ export default function Exports() {
         <ErrorState message={loadError} onRetry={load} />
       ) : (
         <>
-          {reports.length > 0 && (
-            <div className="surface flex flex-wrap items-center justify-between gap-3 p-4 text-sm">
-              <span className="font-semibold text-[#365861]">{selected.size} of {reports.length} selected</span>
-              <div className="flex gap-3">
-                <button onClick={selectAll} className="font-medium text-brand-700 hover:underline">
-                  Select up to 50
-                </button>
-                <button onClick={clearSelection} className="font-medium text-gray-500 hover:underline">
-                  Clear
-                </button>
-              </div>
+          {reports.length === 0 ? (
+            <div className="surface flex flex-col items-center px-6 py-14 text-center">
+              <EmptyVaultIllustration className="h-28 w-28" />
+              <p className="mt-2 text-base font-bold text-[#365861]">Nothing to export yet</p>
+              <p className="mt-1 max-w-xs text-sm text-gray-500">
+                Once you've uploaded a report, you can pick any combination of records here and pull them into one PDF.
+              </p>
+              <Link
+                to="/upload"
+                className="mt-5 rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-bold text-white shadow-sm hover:-translate-y-0.5 hover:bg-brand-700"
+              >
+                Upload your first report
+              </Link>
             </div>
-          )}
-
-          {truncated && (
-            <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-              Showing your most recent {FETCH_PAGE_SIZE} reports for export selection.
-            </p>
-          )}
-
-          <div className="surface space-y-2 p-4">
-            {reports.length === 0 && <p className="text-sm text-gray-400">No reports yet.</p>}
-            {reports.map((r) => (
-              <label key={r.id} className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border-b border-gray-50 px-2 py-3 last:border-0 hover:bg-[#f6faf9]">
-                <div className="flex items-center gap-3">
-                  <input
-                    type="checkbox"
-                    checked={selected.has(r.id)}
-                    onChange={() => toggle(r.id)}
-                    className="h-5 w-5"
-                    aria-label={`Select ${r.name} for export`}
-                  />
-                  <div>
-                    <p className="text-sm font-medium text-gray-900">{r.name}</p>
-                    <p className="text-xs text-gray-500">
-                      {r.category} · {r.reportDate ? new Date(r.reportDate).toLocaleDateString() : "No date"}
-                    </p>
-                  </div>
+          ) : (
+            <>
+              <div className="surface flex flex-wrap items-center justify-between gap-3 p-4 text-sm">
+                <span className="font-semibold text-[#365861]">{selected.size} of {reports.length} selected</span>
+                <div className="flex gap-3">
+                  <button onClick={selectAll} className="font-medium text-brand-700 hover:underline">
+                    Select up to 50
+                  </button>
+                  <button onClick={clearSelection} className="font-medium text-gray-500 hover:underline">
+                    Clear
+                  </button>
                 </div>
-                <StatusBadge status={r.status} />
-              </label>
-            ))}
-          </div>
+              </div>
+
+              {truncated && (
+                <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  Showing your most recent {FETCH_PAGE_SIZE} reports for export selection.
+                </p>
+              )}
+
+              <div className="surface space-y-2 p-4">
+                {reports.map((r) => (
+                  <label key={r.id} className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border-b border-gray-50 px-2 py-3 last:border-0 hover:bg-[#f6faf9]">
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        checked={selected.has(r.id)}
+                        onChange={() => toggle(r.id)}
+                        className="h-5 w-5"
+                        aria-label={`Select ${r.name} for export`}
+                      />
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">{r.name}</p>
+                        <p className="text-xs text-gray-500">
+                          {formatCategory(r.category)} · {r.reportDate ? new Date(r.reportDate).toLocaleDateString() : "No date"}
+                        </p>
+                      </div>
+                    </div>
+                    <StatusBadge status={r.status} />
+                  </label>
+                ))}
+              </div>
+            </>
+          )}
         </>
       )}
 
-      {!loading && !loadError && !jobId && (
+      {!loading && !loadError && !jobId && reports.length > 0 && (
         <button
           onClick={generate}
           disabled={reports.length === 0}

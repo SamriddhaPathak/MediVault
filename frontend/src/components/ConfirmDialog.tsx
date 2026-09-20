@@ -62,7 +62,7 @@ export default function ConfirmDialog({
         <div className="mt-5 flex gap-3">
           <button
             onClick={onCancel}
-            className="flex-1 rounded-lg border border-gray-300 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            className="flex-1 rounded-lg border border-[#cbdedb] py-2.5 text-sm font-bold text-[#365861] hover:bg-[#f3f9f7]"
           >
             Cancel
           </button>

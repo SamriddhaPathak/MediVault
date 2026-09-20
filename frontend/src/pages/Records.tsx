@@ -1,10 +1,12 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { api } from "../services/api";
+import { api, getErrorMessage } from "../services/api";
 import { Report } from "../types";
 import StatusBadge from "../components/StatusBadge";
 import ErrorState from "../components/ErrorState";
 import { SkeletonList } from "../components/Skeleton";
+import { formatCategory } from "../lib/categories";
+import { EmptyVaultIllustration, NoResultsIllustration } from "../components/illustrations";
 
 const CATEGORIES = ["", "LABORATORY", "PRESCRIPTION", "RADIOLOGY", "IMAGING", "VACCINATION", "OTHER"];
 
@@ -53,13 +55,22 @@ export default function Records() {
       setTotal(res.data.total);
     } catch (err: any) {
       if (requestId !== requestIdRef.current) return;
-      setError(err?.response?.data?.error ?? "We couldn't load your records. Please try again.");
+      setError(getErrorMessage(err, "We couldn't load your records. Please try again."));
     } finally {
       if (requestId === requestIdRef.current) setLoading(false);
     }
   }
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const hasActiveFilters = Boolean(search || category || dateFrom || dateTo);
+
+  function clearFilters() {
+    setSearch("");
+    setCategory("");
+    setDateFrom("");
+    setDateTo("");
+    setPage(1);
+  }
 
   return (
     <div className="space-y-6">
@@ -95,7 +106,7 @@ export default function Records() {
           <option value="">All categories</option>
           {CATEGORIES.filter(Boolean).map((c) => (
             <option key={c} value={c}>
-              {c}
+              {formatCategory(c)}
             </option>
           ))}
         </select>
@@ -135,7 +146,44 @@ export default function Records() {
       {!error && loading && <SkeletonList rows={5} />}
 
       {!error && !loading && items.length === 0 && (
-            <div className="surface p-10 text-center"><p className="text-base font-bold text-[#365861]">No reports match your search</p><p className="mt-1 text-sm text-gray-500">Try a different keyword or clear one of the filters.</p></div>
+        <div className="surface flex flex-col items-center px-6 py-14 text-center">
+          {hasActiveFilters ? (
+            <>
+              <NoResultsIllustration className="h-28 w-28" />
+              <p className="mt-2 text-base font-bold text-[#365861]">No reports match your search</p>
+              <p className="mt-1 max-w-xs text-sm text-gray-500">
+                Try a different keyword, or widen the date range and category filters.
+              </p>
+              <button
+                onClick={clearFilters}
+                className="mt-5 rounded-xl border border-[#cbdedb] bg-white px-4 py-2.5 text-sm font-bold text-[#365861] hover:bg-[#f3f9f7]"
+              >
+                Clear filters
+              </button>
+            </>
+          ) : (
+            <>
+              <EmptyVaultIllustration className="h-28 w-28" />
+              <p className="mt-2 text-base font-bold text-[#365861]">Your vault is empty</p>
+              <p className="mt-1 max-w-xs text-sm text-gray-500">
+                Upload your first report to start building your medical history here.
+              </p>
+              <Link
+                to="/upload"
+                className="mt-5 rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-bold text-white shadow-sm hover:-translate-y-0.5 hover:bg-brand-700"
+              >
+                Upload your first report
+              </Link>
+            </>
+          )}
+        </div>
+      )}
+
+      {!error && !loading && items.length > 0 && (
+        <p className="text-xs font-medium text-gray-400">
+          Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total} report
+          {total === 1 ? "" : "s"}
+        </p>
       )}
 
       {!error && !loading && (
@@ -149,7 +197,7 @@ export default function Records() {
               <div>
                 <p className="font-medium text-gray-900">{r.name}</p>
                 <p className="text-xs text-gray-500">
-                  {r.category} · {r.reportDate ? new Date(r.reportDate).toLocaleDateString() : "No date"}
+                  {formatCategory(r.category)} · {r.reportDate ? new Date(r.reportDate).toLocaleDateString() : "No date"}
                 </p>
               </div>
               <StatusBadge status={r.status} />
@@ -163,7 +211,7 @@ export default function Records() {
           <button
             disabled={page <= 1}
             onClick={() => setPage((p) => p - 1)}
-            className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm disabled:opacity-40"
+            className="rounded-lg border border-[#cbdedb] bg-white px-3 py-1.5 text-sm font-medium text-[#365861] hover:bg-[#f3f9f7] disabled:opacity-40"
           >
             Previous
           </button>
@@ -173,7 +221,7 @@ export default function Records() {
           <button
             disabled={page >= totalPages}
             onClick={() => setPage((p) => p + 1)}
-            className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm disabled:opacity-40"
+            className="rounded-lg border border-[#cbdedb] bg-white px-3 py-1.5 text-sm font-medium text-[#365861] hover:bg-[#f3f9f7] disabled:opacity-40"
           >
             Next
           </button>

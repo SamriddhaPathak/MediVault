@@ -11,7 +11,7 @@ interface State {
  * Catches render-time exceptions anywhere in the tree below it so a single
  * broken component (a bad date parse, a null-ref on unexpected API shape,
  * etc.) shows a recoverable error screen instead of a blank white page.
- * Previously there was no boundary at all — any uncaught render error
+ * Previously there was no boundary at all: any uncaught render error
  * white-screened the entire app with nothing in the UI to recover from.
  */
 export default class ErrorBoundary extends React.Component<Props, State> {
@@ -33,7 +33,7 @@ export default class ErrorBoundary extends React.Component<Props, State> {
           <img src="/medivault-cropped.png" alt="MediVault" className="h-12 w-44 object-contain" />
           <p className="text-lg font-semibold text-gray-900">Something went wrong.</p>
           <p className="max-w-sm text-sm text-gray-500">
-            We hit an unexpected error displaying this page. Your data is safe — try reloading.
+            We hit an unexpected error displaying this page. Your data is safe – try reloading.
           </p>
           <button
             onClick={() => window.location.reload()}

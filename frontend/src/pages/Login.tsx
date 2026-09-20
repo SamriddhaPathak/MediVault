@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
+import { getErrorMessage } from "../services/api";
 
 export default function Login() {
   const { login, loading } = useAuth();
@@ -9,17 +10,28 @@ export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // Once the user has actually tried to log in (successfully or not), the
+  // stale "session expired" banner from the ?expired=1 redirect no longer
+  // applies; showing both at once reads as two contradictory messages.
+  const [dismissExpiredNotice, setDismissExpiredNotice] = useState(false);
+  const [dismissDeletedNotice, setDismissDeletedNotice] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    setDismissExpiredNotice(true);
+    setDismissDeletedNotice(true);
     try {
-      await login(email, password);
+      await login(email.trim(), password);
       navigate("/dashboard");
     } catch (err: any) {
-      setError(err?.response?.data?.error ?? "Invalid email or password.");
+      setError(getErrorMessage(err, "Invalid email or password."));
     }
   }
+
+  const showExpiredNotice = Boolean(params.get("expired")) && !dismissExpiredNotice;
+  const showDeletedNotice = Boolean(params.get("accountDeleted")) && !dismissDeletedNotice;
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-[#eef6f4] px-4 py-6 sm:py-10 md:px-8">
@@ -41,18 +53,61 @@ export default function Login() {
           </div>
 
           <div className="space-y-4">
-            {params.get("expired") && <p className="rounded-xl bg-amber-50 px-3 py-2.5 text-sm text-amber-800">Your session has expired. Please log in again.</p>}
+            {showExpiredNotice && <p className="rounded-xl bg-amber-50 px-3 py-2.5 text-sm text-amber-800">Your session has expired. Please log in again.</p>}
+            {showDeletedNotice && <p className="rounded-xl bg-[#f1f8f6] px-3 py-2.5 text-sm text-[#173b45]">Your account and all of its data have been permanently deleted.</p>}
             {error && <p role="alert" className="rounded-xl bg-red-50 px-3 py-2.5 text-sm text-red-700">{error}</p>}
-            <form onSubmit={onSubmit} className="space-y-4">
+            <form onSubmit={onSubmit} className="space-y-4" noValidate>
               <div>
                 <label htmlFor="email" className="mb-1.5 block text-sm font-semibold text-[#365861]">Email</label>
-                <input id="email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className="field-control py-3" autoComplete="email" />
+                <input
+                  id="email"
+                  type="email"
+                  required
+                  autoFocus
+                  value={email}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    if (error) setError(null);
+                  }}
+                  className="field-control py-3"
+                  autoComplete="email"
+                  aria-invalid={Boolean(error)}
+                />
               </div>
               <div>
                 <label htmlFor="password" className="mb-1.5 block text-sm font-semibold text-[#365861]">Password</label>
-                <input id="password" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className="field-control py-3" autoComplete="current-password" />
+                <div className="relative">
+                  <input
+                    id="password"
+                    type={showPassword ? "text" : "password"}
+                    required
+                    value={password}
+                    onChange={(e) => {
+                      setPassword(e.target.value);
+                      if (error) setError(null);
+                    }}
+                    className="field-control py-3 pr-16"
+                    autoComplete="current-password"
+                    aria-invalid={Boolean(error)}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((v) => !v)}
+                    className="absolute inset-y-0 right-3 text-xs font-semibold text-brand-700 hover:underline"
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                  >
+                    {showPassword ? "Hide" : "Show"}
+                  </button>
+                </div>
               </div>
-              <button type="submit" disabled={loading} className="w-full rounded-xl bg-brand-600 py-3.5 text-sm font-bold text-white shadow-sm hover:-translate-y-0.5 hover:bg-brand-700 disabled:opacity-60">{loading ? "Logging in..." : "Log in"}</button>
+              <button
+                type="submit"
+                disabled={loading}
+                aria-busy={loading}
+                className="w-full rounded-xl bg-brand-600 py-3.5 text-sm font-bold text-white shadow-sm hover:-translate-y-0.5 hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0"
+              >
+                {loading ? "Logging in…" : "Log in"}
+              </button>
             </form>
           </div>
 

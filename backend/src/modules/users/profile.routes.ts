@@ -31,5 +31,9 @@ router.get("/", asyncHandler(profileController.get));
 router.patch("/", asyncHandler(profileController.update));
 router.post("/photo", handlePhotoUpload, asyncHandler(profileController.uploadPhoto));
 router.delete("/photo", asyncHandler(profileController.removePhoto));
+// Deletes the whole account (see profile.service.ts#deleteAccount), not just
+// the health-profile row — kept on the profile router since it's triggered
+// from the Edit Profile screen and needs no id param (always "me").
+router.delete("/", asyncHandler(profileController.deleteAccount));
 
 export default router;

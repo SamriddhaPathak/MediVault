@@ -75,13 +75,34 @@ export const reportsController = {
 
   async dashboardSummary(req: Request, res: Response) {
     const ownerId = req.user!.sub;
-    const [total, pending, verified, latest] = await Promise.all([
+    const attentionStatuses: Array<"PENDING_REVIEW" | "OCR_FAILED"> = ["PENDING_REVIEW", "OCR_FAILED"];
+
+    const [total, pending, verified, latest, needsAttentionCount, attention, categoryGroups] = await Promise.all([
       prisma.report.count({ where: { ownerId } }),
       prisma.report.count({ where: { ownerId, status: "PENDING_REVIEW" } }),
       prisma.report.count({ where: { ownerId, status: "VERIFIED" } }),
       prisma.report.findFirst({ where: { ownerId }, orderBy: { uploadTime: "desc" } }),
+      // Reports that need the user to act: awaiting review or failed OCR
+      // outright. Surfaced as its own count and list, rather than left for
+      // the user to notice buried in Records, is what turns "you have 3
+      // pending reports" from a static stat into something actionable.
+      prisma.report.count({ where: { ownerId, status: { in: attentionStatuses } } }),
+      prisma.report.findMany({
+        where: { ownerId, status: { in: attentionStatuses } },
+        orderBy: { uploadTime: "desc" },
+        take: 5,
+      }),
+      // Only categories the user actually has reports in are returned —
+      // an always-six-bar chart with mostly-empty rows reads as a template
+      // default, not as this account's real vault.
+      prisma.report.groupBy({ by: ["category"], where: { ownerId }, _count: { category: true } }),
     ]);
-    res.json({ total, pending, verified, latest });
+
+    const categoryCounts = categoryGroups
+      .map((group) => ({ category: group.category, count: group._count.category }))
+      .sort((a, b) => b.count - a.count);
+
+    res.json({ total, pending, verified, latest, needsAttentionCount, attention, categoryCounts });
   },
 
   async getOne(req: Request, res: Response) {

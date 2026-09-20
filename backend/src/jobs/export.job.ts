@@ -120,3 +120,12 @@ export function readExportFile(fileName: string): Buffer {
   if (!resolved.startsWith(exportDir)) throw new Error("Invalid export file");
   return fs.readFileSync(resolved);
 }
+
+// Best-effort cleanup used by account deletion (profile.service.ts). Unlike
+// readExportFile, a missing file here is not exceptional — an EXPIRED job's
+// PDF may already be gone — so this quietly no-ops instead of throwing.
+export function deleteExportFile(fileName: string): void {
+  const resolved = path.resolve(exportDir, fileName);
+  if (!resolved.startsWith(exportDir)) return;
+  if (fs.existsSync(resolved)) fs.unlinkSync(resolved);
+}

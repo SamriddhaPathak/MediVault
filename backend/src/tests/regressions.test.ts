@@ -282,3 +282,126 @@ describe("List page size matches what the browse views request", () => {
     expect(res.status).toBe(422);
   });
 });
+
+describe("Non-production error responses include diagnostic detail", () => {
+  // A schema mismatch (or any other unexpected failure) previously reached
+  // the client as a bare "Something went wrong. Please try again." with no
+  // way to tell what actually happened short of reading server logs. In
+  // any non-production environment the real error message now rides along
+  // under `detail`, which existing frontend code ignores unless it asks
+  // for it — see services/api.ts's getErrorMessage.
+  //
+  // Tested directly against the middleware rather than by trying to force
+  // a genuine 500 through the full request stack: an unexpected failure is
+  // by definition not something normal API usage can reliably reproduce,
+  // and errorHandler's behavior does not depend on what threw.
+  it("attaches `detail` for an unexpected (non-AppError) failure outside production", () => {
+    const { errorHandler } = require("../middleware/errorHandler");
+    const req = { path: "/api/reports/upload" } as any;
+    let statusCode: number | undefined;
+    let body: any;
+    const res = {
+      status(code: number) {
+        statusCode = code;
+        return this;
+      },
+      json(payload: any) {
+        body = payload;
+        return this;
+      },
+    } as any;
+
+    errorHandler(new Error("no such column: main.Report.processingNotice"), req, res, (() => {}) as any);
+
+    expect(statusCode).toBe(500);
+    expect(body.error).toBe("Something went wrong. Please try again.");
+    // NODE_ENV is "test" here (see tests/setup.ts), which is not
+    // "production", so detail must be present.
+    expect(body.detail).toBe("no such column: main.Report.processingNotice");
+  });
+
+  it("never attaches raw error text for an AppError, regardless of environment", () => {
+    const { errorHandler } = require("../middleware/errorHandler");
+    const { ValidationError } = require("../utils/errors");
+    const req = { path: "/api/reports/upload" } as any;
+    let body: any;
+    const res = {
+      status() {
+        return this;
+      },
+      json(payload: any) {
+        body = payload;
+        return this;
+      },
+    } as any;
+
+    errorHandler(new ValidationError("Please choose a smaller file."), req, res, (() => {}) as any);
+
+    expect(body).toEqual({ error: "Please choose a smaller file." });
+    expect(body.detail).toBeUndefined();
+  });
+});
+
+describe("Dashboard summary includes actionable and category data", () => {
+  // The dashboard previously showed bare totals with nothing to act on or
+  // any sense of what's actually in the vault. needsAttentionCount/
+  // attention/categoryCounts back the richer dashboard content — this
+  // guards the response shape those rely on.
+  it("returns needsAttentionCount, attention, and categoryCounts", async () => {
+    const user = await registerUser("dashboard-rich");
+
+    const okId = await uploadReport(user.accessToken);
+    await prisma.report.update({ where: { id: okId }, data: { status: "VERIFIED", category: "LABORATORY" } });
+
+    const pendingId = await uploadReport(user.accessToken);
+    await prisma.report.update({ where: { id: pendingId }, data: { status: "PENDING_REVIEW", category: "LABORATORY" } });
+
+    const failedId = await uploadReport(user.accessToken);
+    await prisma.report.update({ where: { id: failedId }, data: { status: "OCR_FAILED", category: "RADIOLOGY" } });
+
+    const res = await request(app)
+      .get("/api/reports/dashboard-summary")
+      .set("Authorization", `Bearer ${user.accessToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.total).toBe(3);
+    expect(res.body.verified).toBe(1);
+    expect(res.body.needsAttentionCount).toBe(2);
+
+    const attentionIds = res.body.attention.map((r: { id: string }) => r.id).sort();
+    expect(attentionIds).toEqual([pendingId, failedId].sort());
+
+    const categoryCounts: Array<{ category: string; count: number }> = res.body.categoryCounts;
+    expect(categoryCounts).toEqual(
+      expect.arrayContaining([
+        { category: "LABORATORY", count: 2 },
+        { category: "RADIOLOGY", count: 1 },
+      ])
+    );
+  });
+
+  it("returns zeros and empty lists for a brand new account", async () => {
+    const user = await registerUser("dashboard-empty");
+    const res = await request(app)
+      .get("/api/reports/dashboard-summary")
+      .set("Authorization", `Bearer ${user.accessToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.total).toBe(0);
+    expect(res.body.needsAttentionCount).toBe(0);
+    expect(res.body.attention).toEqual([]);
+    expect(res.body.categoryCounts).toEqual([]);
+  });
+
+  it("never includes another user's reports in the summary", async () => {
+    const owner = await registerUser("dashboard-owner");
+    const other = await registerUser("dashboard-other");
+    await uploadReport(owner.accessToken);
+
+    const res = await request(app)
+      .get("/api/reports/dashboard-summary")
+      .set("Authorization", `Bearer ${other.accessToken}`);
+
+    expect(res.body.total).toBe(0);
+  });
+});

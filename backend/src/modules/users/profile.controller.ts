@@ -15,6 +15,10 @@ const profileSchema = z.object({
   knownConditions: z.string().max(2000).optional(),
 });
 
+const deleteAccountSchema = z.object({
+  password: z.string().min(1, "Enter your password to confirm."),
+});
+
 export const profileController = {
   async get(req: Request, res: Response) {
     const profile = await profileService.get(req.user!.sub);
@@ -64,6 +68,13 @@ export const profileController = {
     if (!current?.profilePhotoKey) throw new NotFoundError("No profile photo to remove.");
     await storageService.delete(current.profilePhotoKey);
     await profileService.upsert(req.user!.sub, { profilePhotoKey: null });
+    res.status(204).send();
+  },
+
+  async deleteAccount(req: Request, res: Response) {
+    const parsed = deleteAccountSchema.safeParse(req.body);
+    if (!parsed.success) throw new ValidationError(parsed.error.issues[0]?.message ?? "Enter your password to confirm.");
+    await profileService.deleteAccount(req.user!.sub, parsed.data.password);
     res.status(204).send();
   },
 };

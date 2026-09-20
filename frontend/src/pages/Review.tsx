@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { api } from "../services/api";
+import { api, getErrorMessage } from "../services/api";
 import { ExtractedField, Report, TestValue } from "../types";
 import SourceTag from "../components/SourceTag";
 import ConfidenceBadge from "../components/ConfidenceBadge";
@@ -13,7 +13,7 @@ import { useToast } from "../components/ToastProvider";
 const CATEGORIES = ["LABORATORY", "PRESCRIPTION", "RADIOLOGY", "IMAGING", "VACCINATION", "OTHER"];
 
 // Fields the review UI manages separately (category/date have their own
-// dedicated controls above) — everything else extracted (patient name,
+// dedicated controls above); everything else extracted (patient name,
 // doctor, hospital, or any test:* field) is shown in the general editor.
 const MANAGED_FIELD_NAMES = new Set(["category", "reportDate"]);
 
@@ -61,7 +61,7 @@ export default function Review() {
       const urlRes = await api.get(`/reports/${id}/file-url`);
       setFileUrl(urlRes.data.url);
     } catch (err: any) {
-      setLoadError(err?.response?.data?.error ?? "We couldn't load this report. Please try again.");
+      setLoadError(getErrorMessage(err, "We couldn't load this report. Please try again."));
     } finally {
       setLoading(false);
     }
@@ -69,7 +69,7 @@ export default function Review() {
 
   // "test:*" fields duplicate what's already editable in the Test Values
   // section above (the OCR job records both a TestValue row and an
-  // ExtractedField audit row per test) — showing them again here would be
+  // ExtractedField audit row per test); showing them again here would be
   // confusing and let the two editors drift out of sync with each other.
   const otherFields = fields.filter(
     (f) => !MANAGED_FIELD_NAMES.has(f.fieldName) && !f.fieldName.startsWith("test:")
@@ -104,7 +104,7 @@ export default function Review() {
       try {
         await api.delete(`/reports/${id}/test-values/${tv.id}`);
       } catch (err: any) {
-        showToast(err?.response?.data?.error ?? "We couldn't remove that test value. Please try again.", "error");
+        showToast(getErrorMessage(err, "We couldn't remove that test value. Please try again."), "error");
         return;
       }
     }
@@ -126,7 +126,7 @@ export default function Review() {
       try {
         await api.delete(`/reports/${id}/fields/${fieldId}`);
       } catch (err: any) {
-        showToast(err?.response?.data?.error ?? "We couldn't remove that field. Please try again.", "error");
+        showToast(getErrorMessage(err, "We couldn't remove that field. Please try again."), "error");
         return;
       }
     }
@@ -190,7 +190,7 @@ export default function Review() {
             numericValue: tv.numericValue,
             // null, not undefined: an emptied input means "clear this".
             // Sending undefined dropped the key entirely, and Prisma reads a
-            // missing key as "leave unchanged" — so a wrong unit that OCR
+            // missing key as "leave unchanged", so a wrong unit that OCR
             // guessed could never be erased, only overwritten.
             unit: tv.unit?.trim() ? tv.unit.trim() : null,
             recordedDate: tv.recordedDate,
@@ -200,7 +200,7 @@ export default function Review() {
       await load();
       return true;
     } catch (err: any) {
-      setSaveError(err?.response?.data?.error ?? "We couldn't save your changes. Please try again.");
+      setSaveError(getErrorMessage(err, "We couldn't save your changes. Please try again."));
       return false;
     } finally {
       setSaving(false);
@@ -221,7 +221,7 @@ export default function Review() {
       showToast("Report verified.");
       navigate(`/records/${id}`);
     } catch (err: any) {
-      setSaveError(err?.response?.data?.error ?? "We couldn't verify this report. Please try again.");
+      setSaveError(getErrorMessage(err, "We couldn't verify this report. Please try again."));
     } finally {
       setSaving(false);
     }
@@ -346,7 +346,7 @@ export default function Review() {
                         value={tv.testName}
                         placeholder="e.g. Hemoglobin"
                         onChange={(e) => updateTestValue(idx, { testName: e.target.value })}
-                        className="mt-0.5 w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-900"
+                        className="mt-0.5 w-full rounded-md border border-[#cbdedb] px-2 py-1.5 text-sm text-gray-900 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100"
                       />
                     </label>
                     <label className="text-xs text-gray-500">
@@ -359,7 +359,7 @@ export default function Review() {
                           const parsed = parseFloat(e.target.value);
                           updateTestValue(idx, { numericValue: Number.isFinite(parsed) ? parsed : NaN });
                         }}
-                        className="mt-0.5 w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-900"
+                        className="mt-0.5 w-full rounded-md border border-[#cbdedb] px-2 py-1.5 text-sm text-gray-900 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100"
                       />
                     </label>
                     <label className="text-xs text-gray-500">
@@ -368,7 +368,7 @@ export default function Review() {
                         value={tv.unit ?? ""}
                         placeholder="e.g. g/dL"
                         onChange={(e) => updateTestValue(idx, { unit: e.target.value })}
-                        className="mt-0.5 w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-900"
+                        className="mt-0.5 w-full rounded-md border border-[#cbdedb] px-2 py-1.5 text-sm text-gray-900 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100"
                       />
                     </label>
                     <label className="col-span-2 text-xs text-gray-500">
@@ -377,7 +377,7 @@ export default function Review() {
                         type="date"
                         value={tv.recordedDate?.slice(0, 10)}
                         onChange={(e) => updateTestValue(idx, { recordedDate: e.target.value })}
-                        className="mt-0.5 w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-900"
+                        className="mt-0.5 w-full rounded-md border border-[#cbdedb] px-2 py-1.5 text-sm text-gray-900 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100"
                       />
                     </label>
                   </div>
@@ -398,24 +398,36 @@ export default function Review() {
                 <p className="text-sm text-gray-400">No other fields extracted for this report.</p>
               )}
               {otherFields.map((f, idx) => (
-                <div key={f.id} className="flex flex-wrap items-center gap-2 rounded-xl border border-[#e1eeeb] bg-[#f8fbfa] p-2.5">
-                  <ConfidenceBadge confidence={f.source === "ocr" ? f.confidence : null} />
-                  <input
-                    value={f.fieldName}
-                    onChange={(e) => updateOtherField(idx, { fieldName: e.target.value })}
-                    placeholder="Field name (e.g. Doctor)"
-                    className="w-32 min-w-0 rounded-md border border-gray-300 px-2 py-1.5 text-sm"
-                  />
-                  <input
-                    value={f.value}
-                    onChange={(e) => updateOtherField(idx, { value: e.target.value })}
-                    placeholder="Value"
-                    className="min-w-0 flex-1 rounded-md border border-gray-300 px-2 py-1.5 text-sm"
-                  />
-                  <SourceTag source={f.source} />
-                  <button onClick={() => removeOtherField(f.id)} className="text-xs text-red-600 hover:underline">
-                    Remove
-                  </button>
+                <div key={f.id} className="rounded-xl border border-[#e1eeeb] bg-[#f8fbfa] p-3">
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <SourceTag source={f.source} />
+                      <ConfidenceBadge confidence={f.source === "ocr" ? f.confidence : null} />
+                    </div>
+                    <button onClick={() => removeOtherField(f.id)} className="text-xs text-red-600 hover:underline">
+                      Remove
+                    </button>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="block text-xs text-gray-500">
+                      Field name
+                      <input
+                        value={f.fieldName}
+                        onChange={(e) => updateOtherField(idx, { fieldName: e.target.value })}
+                        placeholder="Field name (e.g. Doctor)"
+                        className="mt-0.5 w-full rounded-md border border-[#cbdedb] px-2 py-1.5 text-sm text-gray-900 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100"
+                      />
+                    </label>
+                    <label className="block text-xs text-gray-500">
+                      Value
+                      <input
+                        value={f.value}
+                        onChange={(e) => updateOtherField(idx, { value: e.target.value })}
+                        placeholder="Value"
+                        className="mt-0.5 w-full rounded-md border border-[#cbdedb] px-2 py-1.5 text-sm text-gray-900 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100"
+                      />
+                    </label>
+                  </div>
                 </div>
               ))}
             </div>
@@ -425,7 +437,7 @@ export default function Review() {
             <button
               onClick={onSaveClick}
               disabled={saving}
-              className="flex-1 rounded-lg border border-gray-300 bg-white py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+              className="flex-1 rounded-lg border border-[#cbdedb] bg-white py-2.5 text-sm font-bold text-[#365861] hover:bg-[#f3f9f7] disabled:opacity-60"
             >
               {saving ? "Saving..." : "Save Changes"}
             </button>

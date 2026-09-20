@@ -5,7 +5,7 @@ import { Report } from "../types";
  * Renders the original uploaded document.
  *
  * The viewer is chosen from the report's MIME type, which is what the
- * server actually validated on upload — not from the filename, which a
+ * server actually validated on upload, not from the filename, which a
  * user can set to anything. A PDF saved as "results" (no extension) used
  * to be handed to an <img> tag and silently render as a broken image.
  */

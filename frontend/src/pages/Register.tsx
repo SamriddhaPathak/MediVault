@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
+import { getErrorMessage } from "../services/api";
 
 export default function Register() {
   const { register, loading } = useAuth();
@@ -17,7 +18,7 @@ export default function Register() {
       await register(email, password, confirmPassword);
       navigate("/profile?onboarding=1");
     } catch (err: any) {
-      setError(err?.response?.data?.error ?? "We couldn't create your account. Please try again.");
+      setError(getErrorMessage(err, "We couldn't create your account. Please try again."));
     }
   }
 

@@ -11,7 +11,7 @@ export default function ConfidenceBadge({ confidence }: { confidence: number | n
         low ? "bg-red-50 text-red-700 ring-red-200" : "bg-amber-50 text-amber-700 ring-amber-200"
       }`}
     >
-      <span aria-hidden="true">{"\u26A0"}</span> {low ? "Low confidence" : "Review suggested"} — please verify
+      <span aria-hidden="true">{"\u26A0"}</span> {low ? "Low confidence" : "Review suggested"}
     </span>
   );
 }

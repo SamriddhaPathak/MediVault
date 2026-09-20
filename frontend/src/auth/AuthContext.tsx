@@ -24,7 +24,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const raw = localStorage.getItem(USER_KEY);
       return raw ? JSON.parse(raw) : null;
     } catch {
-      // Corrupted stored value — this initializer runs while mounting the
+      // Corrupted stored value: this initializer runs while mounting the
       // provider that wraps the entire app, so letting JSON.parse throw
       // here would crash on load with no recovery short of the user
       // manually clearing browser storage. Treat it as "not signed in".
